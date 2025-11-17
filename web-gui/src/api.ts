@@ -7,7 +7,7 @@ export class ChatAPI {
   private temperature: number;
 
   constructor(
-    apiUrl: string = 'http://localhost:8100/v1/chat/completions',
+    apiUrl: string = 'http://192.168.1.89:8100/v1/chat/completions',
     model: string = 'Qwen/Qwen3-Coder-30B-A3B-Instruct',
     maxTokens: number = 2048,
     temperature: number = 0.7
