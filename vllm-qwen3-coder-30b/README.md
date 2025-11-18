@@ -6,29 +6,39 @@ This directory contains scripts and configuration for running the **Qwen3-Coder-
 **Default Port:** `8100`
 **Model:** `Qwen/Qwen3-Coder-30B-A3B-Instruct`
 
+## Multi-Model Setup
+
+This model runs alongside Qwen2-VL-7B vision model:
+
+| Model | Port | GPU Memory | Use Case |
+|-------|------|------------|----------|
+| **Qwen3-Coder-30B** | **8100** | **55% (~65 GB)** | **Text/code generation** |
+| Qwen2-VL-7B | 8101 | 25% (~26 GB) | Vision understanding |
+| **Total** | | **80%** | **20% safety margin** |
+
 ## Setting Up Additional Models
 
 To set up another model, copy this entire directory and update:
 1. **Folder name**: `vllm-{model-name}`
-2. **In serve-v2.sh**:
+2. **In serve.sh**:
    - `CONTAINER_NAME` - unique name (e.g., `vllm-deepseek-v3`)
    - `MODEL_NAME` - HuggingFace model path
-   - `PORT` - unique port (e.g., 8101, 8102, etc.)
+   - `PORT` - unique port (e.g., 8102, 8103, etc.)
+   - `GPU_MEMORY_UTILIZATION` - adjust to fit (ensure total < 0.85)
 3. **In test-server.sh**: Update default `PORT` to match
 
 All models will share the same HuggingFace cache (`~/.cache/huggingface`), so models are downloaded only once.
 
 ## Quick Start
 
-### Recommended: serve-v2.sh (Persistent Cache)
-
-**Use this for frequent restarts** - caches the model to avoid re-downloading:
-
 ```bash
-./serve-v2.sh
+./serve.sh
 ```
 
-Managing the server:
+The server will be available at `http://localhost:8100` with OpenAI-compatible API endpoints.
+
+### Managing the Server
+
 ```bash
 # Stop the server
 docker stop vllm-qwen3-coder-30b
@@ -46,26 +56,18 @@ docker logs -f vllm-qwen3-coder-30b
 docker rm -f vllm-qwen3-coder-30b
 ```
 
-### Alternative: serve.sh (One-time Run)
-
-For quick testing without persistence:
-
-```bash
-./serve.sh
-```
-
-The server will be available at `http://localhost:8100` with OpenAI-compatible API endpoints.
-
 ## Configuration
 
-Edit the variables at the top of `serve-v2.sh` (or `serve.sh`) to customize your setup:
+Edit the variables at the top of `serve.sh` to customize your setup:
 
 ### Context Window & Concurrency
 - `MAX_MODEL_LEN=32768` - Maximum context length (supports k/K/m/M/g/G suffixes)
 - `MAX_NUM_SEQS=256` - Maximum number of concurrent sequences
 
 ### GPU Memory
-- `GPU_MEMORY_UTILIZATION=0.95` - Fraction of GPU memory to use (0.0-1.0)
+- `GPU_MEMORY_UTILIZATION=0.55` - Fraction of GPU memory to use (0.0-1.0)
+  - Current: 55% for multi-model setup (with Qwen2-VL at 25%)
+  - Single model: Can increase to 0.85-0.95
 
 ### Performance Options
 - `ENABLE_PREFIX_CACHING=true` - Cache common prefixes for faster responses

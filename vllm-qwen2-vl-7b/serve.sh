@@ -1,22 +1,22 @@
 #!/bin/bash
 
-# vLLM Server v2 - Optimized for frequent restarts
+# vLLM Server v2 - Qwen2-VL-7B-Instruct (Vision Language Model)
 # Features:
+# - Vision understanding (images, documents, screenshots)
 # - Persistent model cache (no re-downloading)
 # - Named container for easy management
-# - Detached mode with log viewing
-# - Fast restart capability
+# - Optimized for multi-model deployment
 
 # ==============================================================================
 # Configuration Variables - Modify these as needed
 # ==============================================================================
 
 # Container configuration
-CONTAINER_NAME="vllm-qwen3-coder-30b"  # Named container for easy management
+CONTAINER_NAME="vllm-qwen2-vl-7b"
 
 # Model configuration
-MODEL_NAME="Qwen/Qwen3-Coder-30B-A3B-Instruct"
-PORT=8100  # Unique port for this model (avoid conflicts with other models)
+MODEL_NAME="Qwen/Qwen2-VL-7B-Instruct"
+PORT=8101  # Different port from Qwen3-Coder (8100)
 
 # Cache directory for persistent model storage (avoids re-downloading)
 HF_CACHE_DIR="${HOME}/.cache/huggingface"
@@ -24,17 +24,17 @@ mkdir -p "${HF_CACHE_DIR}"
 
 # Context window and concurrency settings
 MAX_MODEL_LEN=32768              # Maximum context length (32K tokens)
-MAX_NUM_SEQS=256                 # Maximum concurrent sequences
-GPU_MEMORY_UTILIZATION=0.85      # Use 85% of GPU memory (adjust based on available memory)
+MAX_NUM_SEQS=64                  # Lower concurrency for vision model
+GPU_MEMORY_UTILIZATION=0.25      # Use 25% of GPU memory (multi-model serving: 55% Qwen3-Coder + 25% VL = 80% total)
 
 # Performance optimization flags
 ENABLE_PREFIX_CACHING=true       # Enable automatic prefix caching
 ENABLE_CHUNKED_PREFILL=true      # Reduce latency for long prompts
 DTYPE="auto"                     # Automatic dtype selection
 
-# Qwen-specific settings
-ENABLE_AUTO_TOOL_CHOICE=true     # Enable automatic tool selection
-TOOL_CALL_PARSER="qwen3_coder"   # Use Qwen3 Coder parser
+# Vision-specific settings
+# Qwen2-VL supports image inputs through the chat API
+# Max image size will be handled automatically
 
 # Optional: Multi-GPU settings (uncomment if using multiple GPUs)
 # TENSOR_PARALLEL_SIZE=2         # Number of GPUs for tensor parallelism
@@ -50,7 +50,7 @@ if [ "$(docker ps -aq -f name=^${CONTAINER_NAME}$)" ]; then
         echo "Container is already running!"
         echo ""
         echo "To view logs: docker logs -f ${CONTAINER_NAME}"
-        echo "To stop: ./stop.sh"
+        echo "To stop: docker stop ${CONTAINER_NAME}"
         exit 0
     else
         echo "Removing stopped container..."
@@ -87,14 +87,6 @@ if [ "$ENABLE_CHUNKED_PREFILL" = true ]; then
   DOCKER_CMD="$DOCKER_CMD --enable-chunked-prefill"
 fi
 
-if [ "$ENABLE_AUTO_TOOL_CHOICE" = true ]; then
-  DOCKER_CMD="$DOCKER_CMD --enable-auto-tool-choice"
-fi
-
-if [ -n "$TOOL_CALL_PARSER" ]; then
-  DOCKER_CMD="$DOCKER_CMD --tool-call-parser ${TOOL_CALL_PARSER}"
-fi
-
 # Add multi-GPU settings if defined
 if [ -n "$TENSOR_PARALLEL_SIZE" ]; then
   DOCKER_CMD="$DOCKER_CMD --tensor-parallel-size ${TENSOR_PARALLEL_SIZE}"
@@ -109,7 +101,7 @@ fi
 # ==============================================================================
 
 echo "=================================================="
-echo "Starting vLLM Server (v2 - Persistent Cache)"
+echo "Starting vLLM Server - Qwen2-VL-7B (Vision)"
 echo "=================================================="
 echo "Container Name: ${CONTAINER_NAME}"
 echo "Model: ${MODEL_NAME}"
@@ -119,6 +111,11 @@ echo "Max Concurrent Sequences: ${MAX_NUM_SEQS}"
 echo "GPU Memory Utilization: ${GPU_MEMORY_UTILIZATION}"
 echo "Cache Directory: ${HF_CACHE_DIR}"
 echo "=================================================="
+echo ""
+echo "⚠️  IMPORTANT: This is a vision model!"
+echo "    - Supports image inputs via base64 or URLs"
+echo "    - Use OpenAI-compatible vision API format"
+echo "    - Can read: images, PDF screenshots, Excel screenshots"
 echo ""
 
 # Execute the command
@@ -132,12 +129,16 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "Useful commands:"
     echo "  View logs:        docker logs -f ${CONTAINER_NAME}"
-    echo "  Stop server:      ./stop.sh"
-    echo "  Restart server:   ./restart.sh"
-    echo "  Server status:    ./status.sh"
+    echo "  Stop server:      docker stop ${CONTAINER_NAME}"
+    echo "  Remove container: docker rm ${CONTAINER_NAME}"
     echo ""
     echo "The server is starting in the background..."
-    echo "Model loading may take a few minutes on first run."
+    echo "Model loading may take several minutes on first run (downloading ~14GB)."
+    echo ""
+    echo "Multi-model setup:"
+    echo "  Qwen3-Coder-30B (40%):  http://localhost:8100  (text/code)"
+    echo "  Qwen2-VL-7B (30%):      http://localhost:8101  (vision)"
+    echo "  Total GPU usage:        70% (30% safety margin)"
     echo ""
 
     # Show initial logs
