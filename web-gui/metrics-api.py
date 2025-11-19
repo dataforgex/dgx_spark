@@ -117,6 +117,7 @@ async def get_model_status():
     models = [
         {"name": "Qwen3-Coder-30B", "port": 8100},
         {"name": "Qwen2-VL-7B", "port": 8101},
+        {"name": "Qwen3-VL-30B", "port": 8102},
     ]
 
     results = []

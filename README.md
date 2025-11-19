@@ -12,15 +12,23 @@ cd vllm-qwen3-coder-30b
 ./serve.sh
 ```
 
-**Vision Model:**
+**Vision Model (Qwen2-VL-7B):**
 ```bash
 cd vllm-qwen2-vl-7b
 ./serve.sh
 ```
 
+**Vision Model (Qwen3-VL-30B) - Using Transformers:**
+```bash
+cd vllm-qwen3-vl-30b
+./start_docker_transformers.sh
+```
+⚠️ **Note**: This model uses Transformers instead of vLLM due to compatibility issues. See `vllm-qwen3-vl-30b/TROUBLESHOOTING.md` for details.
+
 **Server Info:**
 - **Port 8100**: Qwen3-Coder-30B (text/code generation)
 - **Port 8101**: Qwen2-VL-7B (vision/image understanding)
+- **Port 8102**: Qwen3-VL-30B (advanced vision/image understanding)
 - **Startup time**: ~8 minutes (cached), ~15 minutes (first run)
 - **API**: http://localhost:8100/v1 and http://localhost:8101/v1
 
@@ -85,6 +93,13 @@ dgx_spark/
 - **GPU Memory:** 25% (~26 GB)
 - **Use Cases:** Image understanding, OCR, PDF/Excel processing, visual Q&A
 - **Manage:** `docker stop/start/restart vllm-qwen2-vl-7b`
+
+**Qwen3-VL-30B (Advanced Vision):**
+- **Container:** `vllm-qwen3-vl-30b`
+- **Port:** 8102
+- **GPU Memory:** 55% (~65 GB)
+- **Use Cases:** Advanced image understanding, complex visual reasoning, video analysis
+- **Manage:** `docker stop/start/restart vllm-qwen3-vl-30b`
 
 ### Web GUI
 - **Dashboard**: Real-time monitoring of GPU metrics, temperatures, power, vLLM server status, and Docker containers
