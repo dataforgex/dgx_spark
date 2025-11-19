@@ -24,14 +24,25 @@ cd vllm-qwen2-vl-7b
 - **Startup time**: ~8 minutes (cached), ~15 minutes (first run)
 - **API**: http://localhost:8100/v1 and http://localhost:8101/v1
 
-### 2. Choose a Client
+### 2. Access the Web Interface
 
 #### 🌐 Web GUI (Recommended)
+
+**Start the monitoring API (Terminal 1):**
+```bash
+cd web-gui
+./start-metrics-api.sh
+```
+
+**Start the web interface (Terminal 2):**
 ```bash
 cd web-gui
 npm run dev
 ```
-Open http://localhost:5173
+
+**Access the interface:**
+- **Dashboard**: http://localhost:5173/dashboard - Real-time GPU, system, and model monitoring
+- **Chat**: http://localhost:5173/chat - Interactive chat with the models
 
 #### 🐍 Python CLI
 ```bash
@@ -76,9 +87,11 @@ dgx_spark/
 - **Manage:** `docker stop/start/restart vllm-qwen2-vl-7b`
 
 ### Web GUI
-- Modern dark mode interface
-- Real-time chat with animations
-- Built with React + TypeScript + Vite
+- **Dashboard**: Real-time monitoring of GPU metrics, temperatures, power, vLLM server status, and Docker containers
+- **Chat**: Interactive chat interface with dark mode and animations
+- Built with React + TypeScript + Vite + Chart.js
+- Updates every 5 seconds
+- Navigation between Dashboard and Chat views
 
 ### CLI Clients
 - **Python:** Streaming responses, history management

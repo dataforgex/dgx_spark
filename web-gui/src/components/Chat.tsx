@@ -8,9 +8,10 @@ import './Chat.css';
 const SYSTEM_MESSAGE = 'You are a helpful AI assistant. You provide clear, concise, and accurate responses.';
 
 export function Chat() {
-  const [messages, setMessages] = useState<Message[]>([
-    { role: 'system', content: SYSTEM_MESSAGE }
-  ]);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const saved = localStorage.getItem('chat_history');
+    return saved ? JSON.parse(saved) : [{ role: 'system', content: SYSTEM_MESSAGE }];
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [modelInfo, setModelInfo] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +24,9 @@ export function Chat() {
   }, []);
 
   useEffect(() => {
+    // Save to localStorage whenever messages change
+    localStorage.setItem('chat_history', JSON.stringify(messages));
+
     // Auto-scroll to bottom when messages change
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -48,7 +52,9 @@ export function Chat() {
   };
 
   const handleClear = () => {
-    setMessages([{ role: 'system', content: SYSTEM_MESSAGE }]);
+    const initialMessages: Message[] = [{ role: 'system', content: SYSTEM_MESSAGE }];
+    setMessages(initialMessages);
+    localStorage.setItem('chat_history', JSON.stringify(initialMessages));
     setError(null);
   };
 
