@@ -2,18 +2,22 @@
 
 OpenAI-compatible API server for Qwen3-VL-30B-A3B-Instruct using Transformers.
 
-## Status: Working on CPU
-
+## Status: Working (CPU Only)
 ✅ **Server**: http://localhost:8102
 ✅ **API**: OpenAI-compatible v1 endpoints
 ⚠️ **Performance**: CPU-only (1-3 minutes per response)
-❌ **GPU**: Not working due to GB10/sm_121 incompatibility
+❌ **GPU Mode**: BROKEN (Hangs on GB10/ARM64)
 
 ## Quick Start
 
-### Start Server
+### Start Server (CPU - Working)
 ```bash
 ./start_cpu.sh
+```
+
+### Start Server (GPU - Experimental/Broken)
+```bash
+./start_gpu.sh
 ```
 
 ### Test Server
@@ -96,22 +100,25 @@ curl http://localhost:8102/v1/chat/completions \
 
 ## Files
 
-- **start_cpu.sh** - Start server in background (recommended)
+- **start_gpu.sh** - Start server with GPU support (Docker)
+- **start_cpu.sh** - Start server on CPU (Native venv)
 - **serve_transformers.py** - FastAPI server implementation
 - **setup_transformers.sh** - Setup virtual environment
 - **server_cpu.log** - Server output and errors
 - **venv/** - Python virtual environment
 - **TROUBLESHOOTING.md** - Complete history of all deployment attempts
 
-## Why CPU-Only?
+## Deployment Modes
 
-This model runs on CPU due to hardware/software incompatibilities:
+### CPU Mode (Native) - RECOMMENDED
+Runs in a local virtual environment.
+- **Pros**: Works reliably
+- **Cons**: Very slow (1-3 mins/response)
 
-1. **vLLM doesn't support Qwen3-VL-MoE** architecture on this system
-2. **GB10 GPU (sm_121)** too new for current ML frameworks on ARM64
-3. **PyTorch CUDA for ARM64** requires NVIDIA containers, which reject GB10
-
-See `TROUBLESHOOTING.md` for detailed attempts and failures.
+### GPU Mode (Docker) - BROKEN
+Uses NVIDIA PyTorch container.
+- **Status**: Loads model but HANGS on inference due to GB10 (sm_121) incompatibility with current PyTorch ARM64 builds.
+- **Do not use** unless you have a different GPU.
 
 ## Performance Expectations
 

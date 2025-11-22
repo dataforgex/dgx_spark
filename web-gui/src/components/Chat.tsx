@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChatAPI } from '../api';
+import { ChatAPI, AVAILABLE_MODELS } from '../api';
 import type { Message, Conversation } from '../types';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { ChatSidebar } from './ChatSidebar';
 import './Chat.css';
 
-const SYSTEM_MESSAGE = 'You are a helpful AI assistant. You provide clear, concise, and accurate responses.';
+const SYSTEM_MESSAGE = 'You are a helpful AI assistant. You have access to a web search tool. You MUST use the web_search tool when the user asks for current information, news, weather, or any data that might have changed recently. Do not say you cannot access real-time information without trying to search first.';
 
 export function Chat() {
   const { chatId } = useParams();
@@ -15,6 +15,14 @@ export function Chat() {
   const [conversations, setConversations] = useState<Record<string, Conversation>>(() => {
     const saved = localStorage.getItem('chat_conversations');
     return saved ? JSON.parse(saved) : {};
+  });
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    const saved = localStorage.getItem('selected_model');
+    return saved || 'qwen3-coder-30b';
+  });
+  const [enableSearch, setEnableSearch] = useState<boolean>(() => {
+    const saved = localStorage.getItem('enable_search');
+    return saved === 'true';
   });
 
   // If no chatId, or invalid chatId, we might need to redirect or create new
@@ -28,15 +36,24 @@ export function Chat() {
   const [modelInfo, setModelInfo] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const apiRef = useRef(new ChatAPI());
+  const apiRef = useRef(new ChatAPI(selectedModel));
 
   useEffect(() => {
+    apiRef.current = new ChatAPI(selectedModel);
     apiRef.current.fetchModelInfo().then(setModelInfo);
-  }, []);
+  }, [selectedModel]);
 
   useEffect(() => {
     localStorage.setItem('chat_conversations', JSON.stringify(conversations));
   }, [conversations]);
+
+  useEffect(() => {
+    localStorage.setItem('selected_model', selectedModel);
+  }, [selectedModel]);
+
+  useEffect(() => {
+    localStorage.setItem('enable_search', enableSearch.toString());
+  }, [enableSearch]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -86,8 +103,18 @@ export function Chat() {
     }
 
     try {
-      const response = await apiRef.current.sendMessage(updatedMessages);
-      const assistantMessage: Message = { role: 'assistant', content: response };
+      // Ensure we use the latest system message
+      const messagesToSend = updatedMessages.map(msg =>
+        msg.role === 'system' ? { ...msg, content: SYSTEM_MESSAGE } : msg
+      );
+
+      const response = await apiRef.current.sendMessage(messagesToSend, enableSearch);
+      const assistantMessage: Message = {
+        role: 'assistant',
+        content: response.content,
+        reasoning_content: response.reasoning_content,
+        search_results: response.search_results
+      };
 
       setConversations(prev => ({
         ...prev,
@@ -121,10 +148,8 @@ export function Chat() {
 
   const messages = currentChat ? currentChat.messages : [{ role: 'system' as const, content: SYSTEM_MESSAGE }];
 
-  // Filter out system message for display if desired, or keep it. 
+  // Filter out system message for display if desired, or keep it.
   // Current implementation displays all, but ChatMessage might hide system.
-
-  const api = apiRef.current;
 
   return (
     <div className="chat-layout">
@@ -141,7 +166,32 @@ export function Chat() {
             {currentChat ? currentChat.title : 'New Chat'}
           </div>
           <div className="chat-info">
-            <div>Model: {api.getModel()}</div>
+            <div className="model-selector">
+              <label htmlFor="model-select">Model:</label>
+              <select
+                id="model-select"
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="model-select-dropdown"
+              >
+                {Object.entries(AVAILABLE_MODELS).map(([key, config]) => (
+                  <option key={key} value={key}>
+                    {config.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="search-toggle">
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={enableSearch}
+                  onChange={(e) => setEnableSearch(e.target.checked)}
+                />
+                <span className="toggle-slider"></span>
+              </label>
+              <span className="toggle-label">🔍 Web Search</span>
+            </div>
             {modelInfo && <div>Ctx: {modelInfo.toLocaleString()}</div>}
           </div>
         </div>

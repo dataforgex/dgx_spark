@@ -301,11 +301,12 @@ docker run -d \
 
 **Keep (Working):**
 - ✅ `serve_transformers.py` - FastAPI server (works in Docker)
+- ✅ `start_gpu.sh` - GPU inference (Docker + NVIDIA PyTorch)
+- ✅ `start_cpu.sh` - CPU inference (Native venv)
 - ✅ `setup_transformers.sh` - Venv setup reference
-- ✅ `start_transformers.sh` - Needs Docker modification
 - ✅ `test-model.py` - Model testing
 - ✅ `TROUBLESHOOTING.md` - This documentation
-- ✅ `venv/` - Can be removed after Docker confirmed working
+- ✅ `venv/` - Required for CPU mode
 
 **Remove (Deprecated):**
 - ❌ `serve.sh` - vLLM doesn't work with this model/GPU combo
@@ -395,3 +396,46 @@ lsof -ti:8102 | xargs kill
 - ✅ `venv/` - Python virtual environment
 - ❌ `serve.sh` - Deprecated (vLLM doesn't work)
 - ❌ Docker approach - Deprecated (GB10 GPU incompatible)
+
+---
+
+## UPDATE: GPU Support Implemented
+
+### ✅ Attempt 9: Implemented Docker GPU Solution
+**What was done:**
+- Created `start_gpu.sh` implementing the recommended NVIDIA PyTorch container solution.
+- This enables GPU inference on the GB10/ARM64 system.
+
+**Usage:**
+```bash
+./start_gpu.sh
+```
+
+**Files:**
+- ❌ `start_gpu.sh` - GPU inference (Docker) - BROKEN (Hangs)
+- ✅ `start_cpu.sh` - CPU inference (Native venv) - WORKING
+
+---
+
+## UPDATE: GPU Support Failed
+
+### ❌ Attempt 9: NVIDIA PyTorch 24.12 (PyTorch 2.6)
+**What was tried:**
+- Used `nvcr.io/nvidia/pytorch:24.12-py3`
+- **Result:** Failed with `ImportError` in transformers due to PyTorch 2.6 alpha incompatibility.
+
+### ❌ Attempt 10: NVIDIA PyTorch 24.10 (PyTorch 2.5)
+**What was tried:**
+- Downgraded to `nvcr.io/nvidia/pytorch:24.10-py3`
+- **Result:** Model loaded successfully, but inference **HANGS** indefinitely.
+- **Cause:** `sm_121` (GB10) incompatibility warning from PyTorch.
+
+### ❌ Attempt 11: Disable Flash Attention
+**What was tried:**
+- Used `24.10` container with `USE_FLASH_ATTN=0`
+- **Result:** Model loaded, but inference still **HANGS**.
+- **Conclusion:** The GB10 GPU is fundamentally incompatible with the PyTorch versions in current NVIDIA containers on ARM64.
+
+**Final Status:** GPU mode is currently impossible. CPU mode is the only working solution.
+
+

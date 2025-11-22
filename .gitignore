@@ -40,3 +40,12 @@ venv/
 .env
 .env.local
 .env.*.local
+
+# Large binary files
+ngc/ngccli_arm64.zip
+ngc/ngc-cli
+*.zip
+*.tar.gz
+
+# Project directories to ignore
+eurlex/

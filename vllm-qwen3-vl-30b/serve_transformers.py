@@ -80,18 +80,24 @@ async def load_model():
             from transformers import AutoModelForCausalLM
             ModelClass = AutoModelForCausalLM
 
+        import os
+        use_flash_attn = os.environ.get("USE_FLASH_ATTN", "1") == "1"
+        
         try:
-            # Try with flash attention first
-            model = ModelClass.from_pretrained(
-                MODEL_NAME,
-                torch_dtype=torch.bfloat16,
-                device_map="auto",
-                trust_remote_code=True,
-                attn_implementation="flash_attention_2"
-            )
-            logger.info("Using Flash Attention 2")
+            if use_flash_attn:
+                # Try with flash attention first
+                model = ModelClass.from_pretrained(
+                    MODEL_NAME,
+                    torch_dtype=torch.bfloat16,
+                    device_map="auto",
+                    trust_remote_code=True,
+                    attn_implementation="flash_attention_2"
+                )
+                logger.info("Using Flash Attention 2")
+            else:
+                raise ValueError("Flash Attention disabled by environment variable")
         except Exception as e:
-            logger.warning(f"Flash attention not available, using default: {e}")
+            logger.warning(f"Flash attention not used: {e}")
             model = ModelClass.from_pretrained(
                 MODEL_NAME,
                 torch_dtype=torch.bfloat16,
