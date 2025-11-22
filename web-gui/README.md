@@ -1,90 +1,91 @@
-# LLM Chat Web GUI
+# DGX Spark Web GUI
 
-A modern, responsive web-based chat interface for interacting with local LLM models, built with React, TypeScript, and Vite.
+A modern, responsive web-based interface for the DGX Spark multi-model LLM system. It provides a unified dashboard for monitoring system metrics and an interactive chat interface with web search capabilities.
 
 ## Features
 
-- Real-time chat interface with smooth animations
-- Message history management
-- Clear conversation history
-- Model information display
-- Error handling
-- Responsive design with beautiful gradients
-- Auto-scroll to latest messages
-- Loading indicators
+### 💬 Chat Interface
+- **Multi-Model Support**: Switch seamlessly between Qwen3-Coder (Text/Code), Qwen2-VL (Vision), and Qwen3-VL (Advanced Vision).
+- **Web Search**: Real-time internet access using DuckDuckGo with intelligent page scraping for up-to-date answers.
+- **History**: Persistent conversation history stored locally.
+- **Rich UI**: Markdown support, code highlighting, and responsive design.
 
-## Prerequisites
+### 📊 System Dashboard
+- **GPU Monitoring**: Real-time tracking of GPU temperature, power usage, and memory utilization.
+- **System Stats**: CPU and RAM usage monitoring.
+- **Service Status**: Health checks for all vLLM model servers.
+- **Container Status**: Live status of Docker containers.
 
-- Node.js (v18 or higher)
-- npm
-- A running LLM API server (default: http://localhost:8000)
+## Quick Start
 
-## Installation
-
-```bash
-npm install
-```
-
-## Usage
-
-### Development Mode
-
-Start the development server with hot module replacement:
+The easiest way to start the entire web stack (Frontend + Backend API) is using the helper script:
 
 ```bash
-npm run dev
+./start-all.sh
 ```
 
-The application will be available at `http://localhost:5173`
+This will:
+1. Install Node.js dependencies (if missing).
+2. Create a Python virtual environment and install backend dependencies (if missing).
+3. Start the Metrics/Search API on port **5174**.
+4. Start the Web UI on port **5173**.
 
-### Build for Production
+Access the interface at: **http://localhost:5173**
 
-```bash
-npm run build
-```
+## Architecture
 
-### Preview Production Build
+The project consists of two main components:
 
-```bash
-npm run preview
-```
+### 1. Frontend (React + Vite)
+- **Port**: 5173
+- **Tech Stack**: React, TypeScript, Vite, Chart.js
+- **Key Files**:
+  - `src/components/Chat.tsx`: Main chat logic and UI.
+  - `src/components/Dashboard.tsx`: System monitoring dashboard.
+  - `src/api.ts`: Client for communicating with LLMs and the backend API.
+
+### 2. Backend API (Python FastAPI)
+- **Port**: 5174
+- **Tech Stack**: FastAPI, Uvicorn, DuckDuckGo Search (`ddgs`), BeautifulSoup4
+- **Key File**: `metrics-api.py`
+- **Responsibilities**:
+  - Proxying system metrics (GPU/CPU/RAM).
+  - Performing web searches and scraping page content for the LLM.
+  - Checking health status of vLLM endpoints.
 
 ## Configuration
 
-The default API configuration is set in `src/api.ts`:
+### Model Endpoints
+The application is configured to talk to local vLLM servers on specific ports:
 
-- API URL: `http://localhost:8000/v1/chat/completions`
-- Model: `Qwen/Qwen3-Coder-30B-A3B-Instruct`
-- Max Tokens: 2048
-- Temperature: 0.7
+| Model | Port | Endpoint |
+|-------|------|----------|
+| **Qwen3-Coder-30B** | 8100 | `http://localhost:8100/v1/chat/completions` |
+| **Qwen2-VL-7B** | 8101 | `http://localhost:8101/v1/chat/completions` |
+| **Qwen3-VL-30B** | 8102 | `http://localhost:8102/v1/chat/completions` |
 
-You can modify these values in the `ChatAPI` constructor.
+These can be modified in `src/api.ts`.
 
-## Project Structure
+### Web Search
+The web search feature is documented in detail in [SEARCH_DOCUMENTATION.md](./SEARCH_DOCUMENTATION.md).
 
-```
-src/
-├── components/
-│   ├── Chat.tsx           # Main chat container
-│   ├── Chat.css
-│   ├── ChatMessage.tsx    # Individual message component
-│   ├── ChatMessage.css
-│   ├── ChatInput.tsx      # Message input component
-│   └── ChatInput.css
-├── api.ts                 # API client
-├── types.ts               # TypeScript type definitions
-├── App.tsx                # Root component
-├── App.css
-├── index.css
-└── main.tsx               # Entry point
+## Manual Installation
+
+If you prefer to run components manually:
+
+### 1. Backend API
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python3 metrics-api.py
 ```
 
-## Technologies Used
-
-- **React** - UI framework
-- **TypeScript** - Type safety
-- **Vite** - Fast build tool and dev server
-- **CSS3** - Styling with gradients and animations
+### 2. Frontend
+```bash
+npm install
+npm run dev
+```
 
 ## License
 

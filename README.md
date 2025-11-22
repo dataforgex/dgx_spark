@@ -36,21 +36,21 @@ cd vllm-qwen3-vl-30b
 
 #### 🌐 Web GUI (Recommended)
 
-**Start the monitoring API (Terminal 1):**
-```bash
-cd web-gui
-./start-metrics-api.sh
-```
+The easiest way to start the interface is using the all-in-one script:
 
-**Start the web interface (Terminal 2):**
 ```bash
 cd web-gui
-npm run dev
+./start-all.sh
 ```
 
 **Access the interface:**
 - **Dashboard**: http://localhost:5173/dashboard - Real-time GPU, system, and model monitoring
 - **Chat**: http://localhost:5173/chat - Interactive chat with the models
+
+**New Features:**
+- **Web Search**: Real-time internet access using DuckDuckGo with intelligent page scraping.
+- **Multi-Model Chat**: Switch seamlessly between all running models.
+- **System Monitoring**: Live GPU and container metrics.
 
 #### 🐍 Python CLI
 ```bash
@@ -104,6 +104,7 @@ dgx_spark/
 ### Web GUI
 - **Dashboard**: Real-time monitoring of GPU metrics, temperatures, power, vLLM server status, and Docker containers
 - **Chat**: Interactive chat interface with dark mode and animations
+- **Web Search**: Integrated DuckDuckGo search with page scraping for real-time answers
 - Built with React + TypeScript + Vite + Chart.js
 - Updates every 5 seconds
 - Navigation between Dashboard and Chat views
@@ -302,7 +303,7 @@ docker rm -f vllm-qwen3-coder-30b vllm-qwen2-vl-7b
 
 ✅ Qwen3-Coder-30B: Running on port 8100 (text/code)
 ✅ Qwen2-VL-7B: Running on port 8101 (vision)
-✅ Web GUI: Running on port 5173
+✅ Web GUI: Running on port 5173 (with Web Search)
 ✅ Model Cache: Active (shared across models)
 ✅ APIs: Fully operational
 ✅ Total GPU Usage: ~80% (~93 GB)
