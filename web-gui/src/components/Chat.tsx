@@ -63,12 +63,18 @@ export function Chat() {
   // OR just stay at /chat as a "new chat" placeholder.
   // Let's go with: /chat is a fresh empty chat.
 
-  const handleSend = async (userInput: string) => {
+  const handleSend = async (userInput: string, image?: string) => {
     setError(null);
     setIsLoading(true);
 
     let activeChatId = chatId;
     let updatedMessages: Message[] = [];
+
+    const userMessage: Message = {
+      role: 'user',
+      content: userInput,
+      image: image
+    };
 
     if (!activeChatId || !conversations[activeChatId]) {
       // Create new conversation
@@ -78,7 +84,7 @@ export function Chat() {
         title: userInput.slice(0, 30) + (userInput.length > 30 ? '...' : ''),
         messages: [
           { role: 'system', content: SYSTEM_MESSAGE },
-          { role: 'user', content: userInput }
+          userMessage
         ],
         timestamp: Date.now()
       };
@@ -90,7 +96,7 @@ export function Chat() {
     } else {
       // Update existing
       const chat = conversations[activeChatId];
-      updatedMessages = [...chat.messages, { role: 'user', content: userInput }];
+      updatedMessages = [...chat.messages, userMessage];
 
       setConversations(prev => ({
         ...prev,

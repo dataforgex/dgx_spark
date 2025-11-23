@@ -9,6 +9,7 @@ export interface Message {
   content: string;
   reasoning_content?: string;
   search_results?: SearchResult[];
+  image?: string; // Base64 encoded image
 }
 
 export interface Conversation {

@@ -44,11 +44,11 @@ export const AVAILABLE_MODELS: Record<string, ModelConfig> = {
     modelId: 'Qwen/Qwen3-VL-30B',
     maxTokens: 2048,
   },
-  'qwen3-32b-ngc': {
-    name: 'Qwen3-32B (NGC)',
-    apiUrl: 'http://192.168.1.89:8103/v1/chat/completions',
-    modelId: 'Qwen/Qwen3-32B',
-    maxTokens: 1500,
+  'qwen3-vl-32b-ollama': {
+    name: 'Qwen3-VL-32B (Ollama)',
+    apiUrl: 'http://192.168.1.89:11435/v1/chat/completions',
+    modelId: 'qwen3-vl:32b',
+    maxTokens: 2048,
   },
 };
 
@@ -124,10 +124,26 @@ export class ChatAPI {
     let searchResults: SearchResult[] | undefined;
     let conversationMessages = [...messages];
 
+    // Transform messages to handle images
+    const apiMessages = conversationMessages.map(msg => {
+      if (msg.role === 'user' && msg.image) {
+        return {
+          role: 'user',
+          content: [
+            { type: 'text', text: msg.content },
+            { type: 'image_url', image_url: { url: msg.image } }
+          ]
+        };
+      }
+      // Remove internal fields that shouldn't go to API
+      const { image, search_results, reasoning_content, ...rest } = msg;
+      return rest;
+    });
+
     // Initial request with tools if search is enabled
     const payload: any = {
       model: this.model,
-      messages: conversationMessages,
+      messages: apiMessages,
       max_tokens: this.maxTokens,
       temperature: this.temperature,
     };

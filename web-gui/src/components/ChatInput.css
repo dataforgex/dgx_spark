@@ -1,5 +1,6 @@
 .chat-input-container {
   display: flex;
+  flex-direction: column;
   gap: 1rem;
   padding: 1.5rem;
   background: var(--glass-bg);
@@ -11,9 +12,75 @@
   z-index: 10;
 }
 
+.input-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.image-preview {
+  position: relative;
+  width: fit-content;
+  max-width: 200px;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+}
+
+.image-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 150px;
+  object-fit: cover;
+}
+
+.remove-image {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.remove-image:hover {
+  background: rgba(239, 68, 68, 0.8);
+}
+
+.attach-button {
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 50px;
+  width: 50px;
+}
+
+.attach-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
 .chat-input {
   flex: 1;
-  padding: 1rem;
+  padding: 0.875rem 1rem;
   background: rgba(0, 0, 0, 0.2);
   color: var(--text-primary);
   border: 1px solid var(--glass-border);
@@ -21,7 +88,7 @@
   font-size: 1rem;
   font-family: inherit;
   resize: none;
-  min-height: 60px;
+  min-height: 50px;
   max-height: 200px;
   transition: all 0.2s ease;
   line-height: 1.5;
@@ -60,6 +127,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  height: 50px;
 }
 
 .send-button:hover:not(:disabled) {

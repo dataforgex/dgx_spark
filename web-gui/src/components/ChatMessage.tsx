@@ -19,6 +19,12 @@ export function ChatMessage({ message }: ChatMessageProps) {
         {message.role === 'user' ? '💬 You' : '🤖 Assistant'}
       </div>
 
+      {message.image && (
+        <div className="message-image">
+          <img src={message.image} alt="User upload" />
+        </div>
+      )}
+
       {message.search_results && message.search_results.length > 0 && (
         <div className="search-results-section">
           <div className="search-results-header">🔍 Search Results</div>
