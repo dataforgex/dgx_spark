@@ -2,5 +2,4 @@ fastapi==0.115.0
 uvicorn[standard]==0.32.1
 psutil==6.1.0
 requests==2.32.3
-ddgs>=1.0.0
 beautifulsoup4>=4.12.0

@@ -7,6 +7,7 @@ and Docker container information.
 """
 
 import json
+import os
 import subprocess
 import time
 from datetime import datetime
@@ -191,110 +192,53 @@ class SearchRequest(BaseModel):
 
 @app.post("/api/search")
 async def web_search(request: SearchRequest):
-    """Perform web search using DuckDuckGo"""
-    try:
-        from ddgs import DDGS
+    """Perform web search using SearXNG"""
+    # SearXNG endpoint - configurable via environment variable
+    SEARXNG_URL = os.getenv('SEARXNG_URL', 'http://localhost:8080')
 
+    try:
         print(f"🔍 Search Request: '{request.query}'")
 
+        # Query SearXNG API
+        response = requests.get(
+            f"{SEARXNG_URL}/search",
+            params={
+                'q': request.query,
+                'format': 'json',
+                'pageno': 1
+            },
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        search_results_list = data.get('results', [])
+        print(f"🔍 Found {len(search_results_list)} results from SearXNG")
+
         results = []
-        with DDGS() as ddgs:
-            search_results = ddgs.text(
-                request.query,
-                max_results=request.max_results
-            )
+        for i, result in enumerate(search_results_list[:request.max_results]):
+            url = result.get('url', '')
+            snippet = result.get('content', '')
 
-            # Convert generator to list to inspect
-            search_results_list = list(search_results)
-            print(f"🔍 Found {len(search_results_list)} raw results")
+            # For the top 2 results, try to fetch more detailed content
+            # This makes the search work for ANY topic, not just hardcoded ones
+            if url and i < 2:
+                page_summary = fetch_page_summary(url)
+                if page_summary:
+                    snippet = f"Page Content: {page_summary} ... {snippet}"
 
-            for i, result in enumerate(search_results_list):
-                url = result.get("href", "")
-                snippet = result.get("body", "")
-
-                # For the top 2 results, try to fetch more detailed content
-                # This makes the search work for ANY topic, not just hardcoded ones
-                if url and i < 2:
-                    page_summary = fetch_page_summary(url)
-                    if page_summary:
-                        snippet = f"Page Content: {page_summary} ... {snippet}"
-
-                results.append({
-                    "title": result.get("title", ""),
-                    "url": url,
-                    "snippet": snippet,
-                })
+            results.append({
+                'title': result.get('title', ''),
+                'url': url,
+                'snippet': snippet,
+            })
 
         return {
             "query": request.query,
             "results": results,
             "count": len(results)
         }
-    except ImportError:
-        # Fallback to simple HTTP search if duckduckgo_search not available
-        try:
-            response = requests.get(
-                "https://html.duckduckgo.com/html/",
-                params={"q": request.query},
-                headers={"User-Agent": "Mozilla/5.0"},
-                timeout=10
-            )
 
-            # Simple parsing (basic fallback)
-            from html.parser import HTMLParser
-
-            class SimpleSearchParser(HTMLParser):
-                def __init__(self):
-                    super().__init__()
-                    self.results = []
-                    self.current_result = {}
-                    self.in_result = False
-                    self.in_title = False
-                    self.in_snippet = False
-
-                def handle_starttag(self, tag, attrs):
-                    attrs_dict = dict(attrs)
-                    if tag == "div" and attrs_dict.get("class") == "result":
-                        self.in_result = True
-                        self.current_result = {}
-                    elif self.in_result and tag == "a" and "href" in attrs_dict:
-                        self.current_result["url"] = attrs_dict["href"]
-                        self.in_title = True
-                    elif self.in_result and tag == "a" and attrs_dict.get("class") == "result__snippet":
-                        self.in_snippet = True
-
-                def handle_data(self, data):
-                    if self.in_title:
-                        self.current_result["title"] = data.strip()
-                    elif self.in_snippet:
-                        self.current_result["snippet"] = data.strip()
-
-                def handle_endtag(self, tag):
-                    if tag == "a" and self.in_title:
-                        self.in_title = False
-                    elif tag == "a" and self.in_snippet:
-                        self.in_snippet = False
-                        if self.current_result:
-                            self.results.append(self.current_result)
-                            self.current_result = {}
-                        self.in_result = False
-
-            parser = SimpleSearchParser()
-            parser.feed(response.text)
-
-            return {
-                "query": request.query,
-                "results": parser.results[:request.max_results],
-                "count": len(parser.results[:request.max_results])
-            }
-        except Exception as e:
-            print(f"Fallback search error: {e}")
-            return {
-                "query": request.query,
-                "results": [],
-                "count": 0,
-                "error": "Search temporarily unavailable"
-            }
     except Exception as e:
         print(f"Error performing search: {e}")
         raise HTTPException(status_code=500, detail=str(e))
