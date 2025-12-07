@@ -114,24 +114,73 @@ export function Chat() {
         msg.role === 'system' ? { ...msg, content: SYSTEM_MESSAGE } : msg
       );
 
-      const response = await apiRef.current.sendMessage(messagesToSend, enableSearch);
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: response.content,
-        reasoning_content: response.reasoning_content,
-        search_results: response.search_results
-      };
+      // Start API call - this continues even if component unmounts
+      const responsePromise = apiRef.current.sendMessage(messagesToSend, enableSearch);
 
-      setConversations(prev => ({
-        ...prev,
-        [activeChatId!]: {
-          ...prev[activeChatId!],
-          messages: [...updatedMessages, assistantMessage]
-        }
-      }));
+      responsePromise.then(response => {
+        const assistantMessage: Message = {
+          role: 'assistant',
+          content: response.content,
+          reasoning_content: response.reasoning_content,
+          search_results: response.search_results
+        };
+
+        // Critical: Read localStorage at the moment of update to avoid race conditions
+        // This ensures we don't overwrite updates from other chats
+        const updateConversation = () => {
+          const savedConversations = localStorage.getItem('chat_conversations');
+          const currentConversations = savedConversations ? JSON.parse(savedConversations) : {};
+
+          if (currentConversations[activeChatId!]) {
+            // Append assistant message to the current messages in localStorage
+            const existingMessages = currentConversations[activeChatId!].messages;
+
+            // Only append if assistant message isn't already there (prevent duplicates)
+            const hasResponse = existingMessages.some((msg: Message) =>
+              msg.role === 'assistant' && msg.content === assistantMessage.content
+            );
+
+            if (!hasResponse) {
+              currentConversations[activeChatId!] = {
+                ...currentConversations[activeChatId!],
+                messages: [...existingMessages, assistantMessage],
+                timestamp: Date.now()
+              };
+              localStorage.setItem('chat_conversations', JSON.stringify(currentConversations));
+            }
+          }
+
+          // Also update React state if component is still mounted
+          setConversations(prev => {
+            // Check if already updated to prevent duplicates
+            if (prev[activeChatId!]?.messages.some(msg =>
+              msg.role === 'assistant' && msg.content === assistantMessage.content
+            )) {
+              return prev;
+            }
+
+            return {
+              ...prev,
+              [activeChatId!]: {
+                ...prev[activeChatId!],
+                messages: [...prev[activeChatId!].messages, assistantMessage],
+                timestamp: Date.now()
+              }
+            };
+          });
+        };
+
+        updateConversation();
+      }).catch(err => {
+        console.error('Chat error:', err);
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      }).finally(() => {
+        setIsLoading(false);
+      });
+
+      // Don't await here - let it run in background
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
       setIsLoading(false);
     }
   };

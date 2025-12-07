@@ -1,0 +1,29 @@
+services:
+  web-gui:
+    image: dgx-spark-web-gui:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dgx-spark-web-gui
+    restart: unless-stopped
+    ports:
+      - "5173:5173"  # Web GUI
+      - "5174:5174"  # Metrics API
+    environment:
+      - SEARXNG_URL=http://192.168.1.89:8080
+    volumes:
+      # Mount Docker socket to allow container status monitoring
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    network_mode: host
+    privileged: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility]
+
+networks:
+  default:
+    name: dgx-spark-network

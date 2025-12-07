@@ -63,11 +63,18 @@ interface DockerContainer {
 
 export function Dashboard() {
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null)
-  // Keep up to 1 hour of history (720 points at 5s interval)
-  const MAX_HISTORY_POINTS = 720
+  // Time-based sliding window: Keep last 15 minutes of data
+  const TIME_WINDOW_MS = 15 * 60 * 1000 // 15 minutes in milliseconds
+  const MAX_HISTORY_POINTS = 900 // Safety limit: 15 min * 60 sec = 900 points
   const [history, setHistory] = useState<SystemMetrics[]>(() => {
     const saved = localStorage.getItem('dashboard_history')
-    return saved ? JSON.parse(saved) : []
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      // Clean up old data on load
+      const now = Date.now()
+      return parsed.filter((h: SystemMetrics) => now - h.timestamp < TIME_WINDOW_MS)
+    }
+    return []
   })
   const [modelStatus, setModelStatus] = useState<ModelStatus[]>([])
   const [containers, setContainers] = useState<DockerContainer[]>([])
@@ -85,9 +92,16 @@ export function Dashboard() {
         const data: SystemMetrics = await response.json()
         setMetrics(data)
         setHistory(prev => {
-          const newHistory = [...prev, data].slice(-MAX_HISTORY_POINTS)
-          localStorage.setItem('dashboard_history', JSON.stringify(newHistory))
-          return newHistory
+          const now = Date.now()
+          // Filter out data older than TIME_WINDOW_MS
+          const filtered = prev.filter(h => now - h.timestamp < TIME_WINDOW_MS)
+          // Add new data point
+          const updated = [...filtered, data]
+          // Apply safety limit to prevent unbounded growth
+          const limited = updated.slice(-MAX_HISTORY_POINTS)
+          // Save to localStorage
+          localStorage.setItem('dashboard_history', JSON.stringify(limited))
+          return limited
         })
         setError(null)
       } catch (err) {
@@ -126,7 +140,7 @@ export function Dashboard() {
       fetchMetrics()
       fetchModelStatus()
       fetchContainers()
-    }, 5000)
+    }, 1000) // Update every 1 second for real-time monitoring
 
     return () => clearInterval(interval)
   }, [API_BASE])
@@ -160,8 +174,48 @@ export function Dashboard() {
     }
     : null
 
+  // Format timestamp for display
+  const formatTime = (timestamp: number) => {
+    const date = new Date(timestamp)
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    })
+  }
+
+  // Format full timestamp for tooltip
+  const formatFullTime = (timestamp: number) => {
+    const date = new Date(timestamp)
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    })
+  }
+
+  // Calculate time range being displayed
+  const getTimeRange = () => {
+    if (history.length === 0) return 'No data'
+    const oldestTimestamp = history[0].timestamp
+    const newestTimestamp = history[history.length - 1].timestamp
+    const rangeMs = newestTimestamp - oldestTimestamp
+    const rangeMinutes = Math.floor(rangeMs / 60000)
+
+    if (rangeMinutes < 1) return 'Less than 1 minute'
+    if (rangeMinutes < 60) return `Last ${rangeMinutes} minutes`
+    const rangeHours = Math.floor(rangeMinutes / 60)
+    const remainingMinutes = rangeMinutes % 60
+    if (remainingMinutes === 0) return `Last ${rangeHours} hour${rangeHours > 1 ? 's' : ''}`
+    return `Last ${rangeHours}h ${remainingMinutes}m`
+  }
+
   const gpuUtilizationHistory = {
-    labels: history.map((_, i) => `${i * 5}s`),
+    labels: history.map(h => h.timestamp),
     datasets:
       metrics?.gpus.map((gpu, idx) => ({
         label: `GPU ${gpu.index}`,
@@ -174,15 +228,16 @@ export function Dashboard() {
           gradient.addColorStop(1, 'rgba(59, 130, 246, 0.0)')
           return gradient
         },
-        tension: 0.4,
+        tension: 0.5, // Increased from 0.4 for smoother curves
         fill: true,
         pointRadius: 0,
         pointHoverRadius: 4,
+        cubicInterpolationMode: 'monotone' as const, // Prevents overshooting
       })) || [],
   }
 
   const temperatureHistory = {
-    labels: history.map((_, i) => `${i * 5}s`),
+    labels: history.map(h => h.timestamp),
     datasets:
       metrics?.gpus.map((gpu, idx) => ({
         label: `GPU ${gpu.index} Temp`,
@@ -195,16 +250,26 @@ export function Dashboard() {
           gradient.addColorStop(1, 'rgba(245, 158, 11, 0.0)')
           return gradient
         },
-        tension: 0.4,
+        tension: 0.5, // Increased from 0.4 for smoother curves
         fill: true,
         pointRadius: 0,
         pointHoverRadius: 4,
+        cubicInterpolationMode: 'monotone' as const, // Prevents overshooting
       })) || [],
   }
+
+  // Calculate X-axis range dynamically based on current time
+  // This ensures the graph always shows the correct time window
+  const now = Date.now()
+  const xAxisMin = now - TIME_WINDOW_MS
+  const xAxisMax = now
 
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
+    animation: {
+      duration: 0, // Disable animation for smoother real-time updates
+    },
     plugins: {
       legend: {
         labels: {
@@ -226,13 +291,30 @@ export function Dashboard() {
         padding: 10,
         cornerRadius: 8,
         displayColors: true,
+        callbacks: {
+          title: (context: any) => {
+            // Show full timestamp in tooltip
+            return formatFullTime(context[0].parsed.x)
+          },
+        },
       },
     },
     scales: {
       x: {
+        type: 'linear' as const,
+        min: xAxisMin,
+        max: xAxisMax,
         ticks: {
           color: '#64748b', // Slate 500
           font: { size: 10 },
+          maxRotation: 0,
+          autoSkip: true,
+          autoSkipPadding: 50,
+          maxTicksLimit: 8,
+          callback: function(value: any) {
+            // Format timestamp for X-axis labels
+            return formatTime(value)
+          },
         },
         grid: {
           color: 'rgba(148, 163, 184, 0.1)',
@@ -319,7 +401,7 @@ export function Dashboard() {
         {/* GPU Utilization */}
         <div className="dashboard-row">
           <div className="card half">
-            <h2>GPU Utilization</h2>
+            <h2>GPU Utilization <span style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', fontWeight: 'normal' }}>({getTimeRange()})</span></h2>
             <div className="chart-container">
               <Line data={gpuUtilizationHistory} options={chartOptions} />
             </div>
@@ -333,7 +415,7 @@ export function Dashboard() {
           </div>
 
           <div className="card half">
-            <h2>GPU Temperature</h2>
+            <h2>GPU Temperature <span style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', fontWeight: 'normal' }}>({getTimeRange()})</span></h2>
             <div className="chart-container">
               <Line data={temperatureHistory} options={chartOptions} />
             </div>

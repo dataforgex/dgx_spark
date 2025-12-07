@@ -44,6 +44,12 @@ export const AVAILABLE_MODELS: Record<string, ModelConfig> = {
     modelId: 'Qwen/Qwen3-VL-30B',
     maxTokens: 2048,
   },
+  'ministral3-14b': {
+    name: 'Ministral-3-14B',
+    apiUrl: 'http://192.168.1.89:8103/v1/chat/completions',
+    modelId: 'mistralai/Ministral-3-14B-Instruct-2512',
+    maxTokens: 2048,
+  },
   'qwen3-vl-32b-ollama': {
     name: 'Qwen3-VL-32B (Ollama)',
     apiUrl: 'http://192.168.1.89:11435/v1/chat/completions',

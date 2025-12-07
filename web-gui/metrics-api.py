@@ -12,6 +12,7 @@ import subprocess
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -19,7 +20,14 @@ import uvicorn
 import requests
 import psutil
 
-app = FastAPI(title="DGX Spark Metrics API")
+# Initialize CPU percent on startup to establish baseline
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize psutil CPU percent with a baseline reading"""
+    psutil.cpu_percent(interval=None)
+    yield
+
+app = FastAPI(title="DGX Spark Metrics API", lifespan=lifespan)
 
 # Enable CORS for the frontend
 app.add_middleware(
@@ -29,12 +37,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize CPU percent on startup to establish baseline
-@app.on_event("startup")
-async def startup_event():
-    """Initialize psutil CPU percent with a baseline reading"""
-    psutil.cpu_percent(interval=None)
 
 
 def get_gpu_metrics() -> List[Dict[str, Any]]:
@@ -121,7 +123,7 @@ async def get_model_status():
         {"name": "Qwen3-Coder-30B", "port": 8100, "health_endpoint": "/health"},
         {"name": "Qwen2-VL-7B", "port": 8101, "health_endpoint": "/health"},
         {"name": "Qwen3-VL-30B", "port": 8102, "health_endpoint": "/health"},
-        {"name": "Qwen3-32B (NGC)", "port": 8103, "health_endpoint": "/v1/health/ready"},
+        {"name": "Ministral-3-14B", "port": 8103, "health_endpoint": "/health"},
     ]
 
     results = []
