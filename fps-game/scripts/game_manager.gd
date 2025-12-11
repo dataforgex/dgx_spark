@@ -29,6 +29,7 @@ var wave_label: Label
 var combo_label: Label
 var armor_label: Label
 var money_label: Label
+var damage_label: Label
 var kill_feed: VBoxContainer
 
 # Enemy spawning
@@ -106,6 +107,16 @@ func _setup_hud() -> void:
 	money_label.position = Vector2(20, 120)
 	$HUD.add_child(money_label)
 
+	# Damage label (top right, below score)
+	damage_label = Label.new()
+	damage_label.text = "Damage: %d" % player.damage_per_shot
+	damage_label.add_theme_font_size_override("font_size", 20)
+	damage_label.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
+	damage_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	damage_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	damage_label.position = Vector2(-20, 55)
+	$HUD.add_child(damage_label)
+
 	# Kill feed (top right)
 	kill_feed = VBoxContainer.new()
 	kill_feed.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -176,6 +187,38 @@ func _create_pause_menu() -> void:
 	spacer3.custom_minimum_size = Vector2(0, 20)
 	vbox.add_child(spacer3)
 
+	# Sensitivity setting
+	var sens_container := HBoxContainer.new()
+	sens_container.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_child(sens_container)
+
+	var sens_label := Label.new()
+	sens_label.text = "Sensitivity: "
+	sens_label.add_theme_font_size_override("font_size", 18)
+	sens_container.add_child(sens_label)
+
+	var sens_value_label := Label.new()
+	sens_value_label.text = "%.3f" % player.mouse_sensitivity
+	sens_value_label.add_theme_font_size_override("font_size", 18)
+	sens_value_label.custom_minimum_size = Vector2(60, 0)
+
+	var sens_slider := HSlider.new()
+	sens_slider.min_value = 0.0005
+	sens_slider.max_value = 0.01
+	sens_slider.step = 0.0005
+	sens_slider.value = player.mouse_sensitivity
+	sens_slider.custom_minimum_size = Vector2(150, 20)
+	sens_slider.value_changed.connect(func(value: float):
+		player.mouse_sensitivity = value
+		sens_value_label.text = "%.3f" % value
+	)
+	sens_container.add_child(sens_slider)
+	sens_container.add_child(sens_value_label)
+
+	var spacer4 := Control.new()
+	spacer4.custom_minimum_size = Vector2(0, 15)
+	vbox.add_child(spacer4)
+
 	# Stats
 	var stats := Label.new()
 	stats.text = "Press ESC to resume"
@@ -226,6 +269,7 @@ func _process_timers(delta: float) -> void:
 		if damage_boost_timer <= 0 and is_instance_valid(player):
 			player.damage_per_shot = maxi(player.damage_per_shot - damage_boost_amount, 25)
 			damage_boost_amount = 0
+			_update_damage_label()
 
 func _setup_enemy(enemy: Node3D) -> void:
 	enemy.enemy_died.connect(_on_enemy_died)
@@ -373,6 +417,14 @@ func _on_player_armor_changed(new_armor: int) -> void:
 func _on_player_money_changed(new_money: int) -> void:
 	money_label.text = "$%d" % new_money
 
+func _update_damage_label() -> void:
+	damage_label.text = "Damage: %d" % player.damage_per_shot
+	# Highlight when boosted (above base damage of 25)
+	if player.damage_per_shot > 25:
+		damage_label.add_theme_color_override("font_color", Color(1, 0.2, 0.2))
+	else:
+		damage_label.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
+
 func _on_player_ammo_changed(current: int, reserve: int) -> void:
 	ammo_label.text = "Ammo: %d / %d" % [current, reserve]
 
@@ -449,6 +501,7 @@ func _spawn_powerup(pos: Vector3) -> void:
 	var powerup := Area3D.new()
 	powerup.collision_layer = 0
 	powerup.collision_mask = 2  # Player layer
+	powerup.monitoring = true  # Explicitly enable to detect bodies
 
 	var col := CollisionShape3D.new()
 	var shape := SphereShape3D.new()
@@ -532,6 +585,7 @@ func _pickup_powerup(powerup: Area3D) -> void:
 			_show_pickup_text("+30 AMMO", Color.YELLOW)
 		"damage":
 			player.damage_per_shot += 10
+			_update_damage_label()
 			_show_pickup_text("DAMAGE UP!", Color.RED)
 			# Use timer variable instead of create_timer
 			damage_boost_amount = 10

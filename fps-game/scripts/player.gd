@@ -351,6 +351,7 @@ func shoot() -> void:
 	tween.tween_property(gun_pivot, "position:z", -0.4, 0.1)
 
 	# Raycast hit detection
+	raycast.force_raycast_update()
 	if raycast.is_colliding():
 		var collider := raycast.get_collider()
 		# Null safety check
@@ -359,6 +360,7 @@ func shoot() -> void:
 			return
 
 		var hit_point := raycast.get_collision_point()
+		print("Hit: ", collider.name, " in_group enemies: ", collider.is_in_group("enemies"))
 
 		# Spawn hit effect and bullet tracer
 		spawn_hit_effect(hit_point)
@@ -373,6 +375,7 @@ func shoot() -> void:
 				headshot_sound.play()
 				_show_headshot_indicator()
 			if collider.has_method("take_damage"):
+				print("Dealing ", final_damage, " damage to enemy")
 				collider.take_damage(final_damage, is_headshot)
 
 	# Fire rate cooldown using timer variable

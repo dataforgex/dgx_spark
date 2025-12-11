@@ -32,6 +32,10 @@ ENABLE_PREFIX_CACHING=true       # Enable automatic prefix caching
 ENABLE_CHUNKED_PREFILL=true      # Reduce latency for long prompts
 DTYPE="auto"                     # Automatic dtype selection
 
+# Tool calling settings
+ENABLE_AUTO_TOOL_CHOICE=true     # Enable automatic tool choice
+TOOL_CALL_PARSER="hermes"        # Tool call parser (hermes works well with Qwen)
+
 # Vision-specific settings
 # Qwen2-VL supports image inputs through the chat API
 # Max image size will be handled automatically
@@ -85,6 +89,11 @@ fi
 
 if [ "$ENABLE_CHUNKED_PREFILL" = true ]; then
   DOCKER_CMD="$DOCKER_CMD --enable-chunked-prefill"
+fi
+
+# Add tool calling settings
+if [ "$ENABLE_AUTO_TOOL_CHOICE" = true ]; then
+  DOCKER_CMD="$DOCKER_CMD --enable-auto-tool-choice --tool-call-parser ${TOOL_CALL_PARSER}"
 fi
 
 # Add multi-GPU settings if defined

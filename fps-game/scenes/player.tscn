@@ -51,6 +51,7 @@ mesh = SubResource("BoxMesh_muzzle")
 surface_material_override/0 = SubResource("Material_muzzle")
 
 [node name="RayCast3D" type="RayCast3D" parent="Head/Camera3D"]
+enabled = true
 target_position = Vector3(0, 0, -100)
 collision_mask = 5
 
