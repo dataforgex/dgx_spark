@@ -2,10 +2,16 @@ import type { ChatRequest, ModelInfo, SearchResult } from './types';
 
 export interface ModelConfig {
   name: string;
-  apiUrl: string;
+  port: number;
   modelId: string;
   maxTokens: number;
 }
+
+// Use 127.0.0.1 for localhost to avoid IPv6 resolution issues
+const getApiHost = () => {
+  const hostname = window.location.hostname;
+  return hostname === 'localhost' ? '127.0.0.1' : hostname;
+};
 
 const SEARCH_TOOL = {
   type: "function",
@@ -28,68 +34,38 @@ const SEARCH_TOOL = {
 export const AVAILABLE_MODELS: Record<string, ModelConfig> = {
   'qwen3-coder-30b': {
     name: 'Qwen3-Coder-30B',
-    apiUrl: 'http://192.168.1.89:8100/v1/chat/completions',
+    port: 8100,
     modelId: 'Qwen/Qwen3-Coder-30B-A3B-Instruct',
     maxTokens: 2048,
   },
   'qwen2-vl-7b': {
     name: 'Qwen2-VL-7B',
-    apiUrl: 'http://192.168.1.89:8101/v1/chat/completions',
+    port: 8101,
     modelId: 'Qwen/Qwen2-VL-7B-Instruct',
-    maxTokens: 2048,
-  },
-  'qwen3-vl-30b': {
-    name: 'Qwen3-VL-30B',
-    apiUrl: 'http://192.168.1.89:8102/v1/chat/completions',
-    modelId: 'Qwen/Qwen3-VL-30B',
     maxTokens: 2048,
   },
   'ministral3-14b': {
     name: 'Ministral-3-14B',
-    apiUrl: 'http://192.168.1.89:8103/v1/chat/completions',
+    port: 8103,
     modelId: 'mistralai/Ministral-3-14B-Instruct-2512',
     maxTokens: 2048,
   },
   'qwen3-vl-32b-ollama': {
     name: 'Qwen3-VL-32B (Ollama)',
-    apiUrl: 'http://192.168.1.89:11435/v1/chat/completions',
+    port: 11435,
     modelId: 'qwen3-vl:32b',
-    maxTokens: 2048,
-  },
-  'qwen2.5-vl-7b-fp8': {
-    name: 'Qwen2.5-VL-7B-FP8 (TRT-LLM)',
-    apiUrl: 'http://192.168.1.89:8200/v1/chat/completions',
-    modelId: 'nvidia/Qwen2.5-VL-7B-Instruct-FP8',
-    maxTokens: 2048,
-  },
-  'qwen2.5-vl-7b-fp4': {
-    name: 'Qwen2.5-VL-7B-FP4 (TRT-LLM)',
-    apiUrl: 'http://192.168.1.89:8201/v1/chat/completions',
-    modelId: 'nvidia/Qwen2.5-VL-7B-Instruct-FP4',
-    maxTokens: 2048,
-  },
-  'qwen3-30b-fp4': {
-    name: 'Qwen3-30B-A3B-FP4 (TRT-LLM)',
-    apiUrl: 'http://192.168.1.89:8202/v1/chat/completions',
-    modelId: 'nvidia/Qwen3-30B-A3B-FP4',
-    maxTokens: 2048,
-  },
-  'qwen3-32b-fp4': {
-    name: 'Qwen3-32B-FP4 (TRT-LLM)',
-    apiUrl: 'http://192.168.1.89:8203/v1/chat/completions',
-    modelId: 'nvidia/Qwen3-32B-FP4',
     maxTokens: 2048,
   },
   'qwen3-coder-30b-awq': {
     name: 'Qwen3-Coder-30B-AWQ (vLLM)',
-    apiUrl: 'http://192.168.1.89:8104/v1/chat/completions',
+    port: 8104,
     modelId: 'cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit',
     maxTokens: 2048,
   },
 };
 
 export class ChatAPI {
-  private apiUrl: string;
+  private port: number;
   private model: string;
   private maxTokens: number;
   private temperature: number;
@@ -99,7 +75,7 @@ export class ChatAPI {
     temperature: number = 0.7
   ) {
     const config = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS['qwen3-coder-30b'];
-    this.apiUrl = config.apiUrl;
+    this.port = config.port;
     this.model = config.modelId;
     this.maxTokens = config.maxTokens;
     this.temperature = temperature;
@@ -108,7 +84,7 @@ export class ChatAPI {
   setModel(modelKey: string) {
     const config = AVAILABLE_MODELS[modelKey];
     if (config) {
-      this.apiUrl = config.apiUrl;
+      this.port = config.port;
       this.model = config.modelId;
       this.maxTokens = config.maxTokens;
     }
@@ -116,8 +92,7 @@ export class ChatAPI {
 
   async fetchModelInfo(): Promise<number | null> {
     try {
-      const baseUrl = this.apiUrl.replace(/\/v1\/chat\/completions$/, '');
-      const modelsUrl = `${baseUrl}/v1/models`;
+      const modelsUrl = `http://${getApiHost()}:${this.port}/v1/models`;
 
       const response = await fetch(modelsUrl, {
         signal: AbortSignal.timeout(5000),
@@ -135,7 +110,7 @@ export class ChatAPI {
   }
 
   private async performWebSearch(query: string): Promise<SearchResult[]> {
-    const apiBase = `http://${window.location.hostname}:5174`;
+    const apiBase = `http://${getApiHost()}:5174`;
     const response = await fetch(`${apiBase}/api/search`, {
       method: 'POST',
       headers: {
@@ -182,6 +157,7 @@ export class ChatAPI {
       messages: apiMessages,
       max_tokens: this.maxTokens,
       temperature: this.temperature,
+      repetition_penalty: 1.1,  // Prevent repetition loops (especially for TRT-LLM)
     };
 
     if (enableSearch) {
@@ -189,7 +165,9 @@ export class ChatAPI {
       payload.tool_choice = "auto";
     }
 
-    let response = await fetch(this.apiUrl, {
+    // Call model server directly (CORS enabled on vLLM, nginx wrapper on TRT-LLM)
+    const modelUrl = `http://${getApiHost()}:${this.port}/v1/chat/completions`;
+    let response = await fetch(modelUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -253,11 +231,12 @@ export class ChatAPI {
           messages: conversationMessages,
           max_tokens: this.maxTokens,
           temperature: this.temperature,
+          repetition_penalty: 1.1,
         };
 
         console.log('📤 Second API call payload:', JSON.stringify(secondPayload, null, 2));
 
-        response = await fetch(this.apiUrl, {
+        response = await fetch(modelUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -288,7 +267,7 @@ export class ChatAPI {
   }
 
   getApiUrl(): string {
-    return this.apiUrl;
+    return `http://${getApiHost()}:${this.port}/v1/chat/completions`;
   }
 
   getMaxTokens(): number {

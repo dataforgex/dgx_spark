@@ -254,6 +254,157 @@
   border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
+/* Model Manager Grid */
+.model-manager-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.managed-model-card {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  transition: all 0.2s;
+}
+
+.managed-model-card:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.managed-model-card.running {
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.managed-model-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.managed-model-name {
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.engine-badge {
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.engine-badge.vllm {
+  background: rgba(99, 102, 241, 0.2);
+  color: #818cf8;
+}
+
+.engine-badge.trtllm {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+
+.engine-badge.ollama {
+  background: rgba(251, 146, 60, 0.2);
+  color: #fb923c;
+}
+
+.managed-model-status {
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-bottom: 0.75rem;
+}
+
+.managed-model-status.running {
+  color: var(--accent-success);
+}
+
+.managed-model-status.stopped,
+.managed-model-status.not_created {
+  color: var(--text-tertiary);
+}
+
+.managed-model-status.starting {
+  color: #fbbf24;
+}
+
+.managed-model-details {
+  margin-bottom: 0.75rem;
+}
+
+.managed-model-details .detail-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+  padding: 0.2rem 0;
+}
+
+.managed-model-details .detail-row span:last-child {
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.managed-model-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.model-btn {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.model-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.model-btn.start {
+  background: rgba(16, 185, 129, 0.2);
+  color: var(--accent-success);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.model-btn.start:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.3);
+}
+
+.model-btn.stop {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--accent-error);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.model-btn.stop:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.3);
+}
+
+.no-models {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 2rem;
+  color: var(--text-tertiary);
+}
+
+.no-models code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

@@ -1,0 +1,33 @@
+{
+  "timestamp": "2025-12-13 16:43:56",
+  "iterations": 3,
+  "streaming": true,
+  "results": {
+    "vllm-qwen3-coder-30b-awq": {
+      "short": {
+        "ttft_avg": 0.7949728539994491,
+        "ttft_std": 1.2661019830993805,
+        "tps_avg": 64.29244871520767,
+        "tps_std": 0.6464324516197342,
+        "total_time_avg": 2.66139477333248,
+        "iterations": 3
+      },
+      "medium": {
+        "ttft_avg": 0.07306268299968603,
+        "ttft_std": 0.0513732727547069,
+        "tps_avg": 47.75089714386083,
+        "tps_std": 0.800225344700951,
+        "total_time_avg": 5.826063737332636,
+        "iterations": 3
+      },
+      "long": {
+        "ttft_avg": 0.09164992900089904,
+        "ttft_std": 0.06728104062210329,
+        "tps_avg": 53.491059973290476,
+        "tps_std": 0.8085131854266218,
+        "total_time_avg": 9.631626204001805,
+        "iterations": 3
+      }
+    }
+  }
+}

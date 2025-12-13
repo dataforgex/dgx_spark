@@ -9,6 +9,19 @@ import './Chat.css';
 
 const SYSTEM_MESSAGE = 'You are a helpful AI assistant. You have access to a web search tool. You MUST use the web_search tool when the user asks for current information, news, weather, or any data that might have changed recently. Do not say you cannot access real-time information without trying to search first.';
 
+// Use 127.0.0.1 for localhost to avoid IPv6 resolution issues
+const getModelManagerHost = () => {
+  const hostname = window.location.hostname;
+  return hostname === 'localhost' ? '127.0.0.1' : hostname;
+};
+const MODEL_MANAGER_API = `http://${getModelManagerHost()}:5175`;
+
+interface ManagedModel {
+  id: string;
+  name: string;
+  status: string;
+}
+
 export function Chat() {
   const { chatId } = useParams();
   const navigate = useNavigate();
@@ -35,12 +48,43 @@ export function Chat() {
   const [isLoading, setIsLoading] = useState(false);
   const [modelInfo, setModelInfo] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [runningModels, setRunningModels] = useState<Set<string>>(new Set());
+  const [modelsLoaded, setModelsLoaded] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef(new ChatAPI(selectedModel));
 
   useEffect(() => {
     apiRef.current = new ChatAPI(selectedModel);
     apiRef.current.fetchModelInfo().then(setModelInfo);
+  }, [selectedModel]);
+
+  // Fetch running models from model-manager API
+  useEffect(() => {
+    const fetchRunningModels = async () => {
+      try {
+        const response = await fetch(`${MODEL_MANAGER_API}/api/models`);
+        if (response.ok) {
+          const models: ManagedModel[] = await response.json();
+          const running = new Set(
+            models.filter(m => m.status === 'running').map(m => m.id)
+          );
+          setRunningModels(running);
+          setModelsLoaded(true);
+
+          // If currently selected model is not running, select first running model
+          if (running.size > 0 && !running.has(selectedModel)) {
+            const firstRunning = Array.from(running)[0];
+            setSelectedModel(firstRunning);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch running models:', err);
+      }
+    };
+
+    fetchRunningModels();
+    const interval = setInterval(fetchRunningModels, 5000);
+    return () => clearInterval(interval);
   }, [selectedModel]);
 
   useEffect(() => {
@@ -228,12 +272,21 @@ export function Chat() {
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
                 className="model-select-dropdown"
+                disabled={!modelsLoaded || runningModels.size === 0}
               >
-                {Object.entries(AVAILABLE_MODELS).map(([key, config]) => (
-                  <option key={key} value={key}>
-                    {config.name}
-                  </option>
-                ))}
+                {!modelsLoaded ? (
+                  <option value="">Loading models...</option>
+                ) : runningModels.size === 0 ? (
+                  <option value="">No models running</option>
+                ) : (
+                  Object.entries(AVAILABLE_MODELS)
+                    .filter(([key]) => runningModels.has(key))
+                    .map(([key, config]) => (
+                      <option key={key} value={key}>
+                        {config.name}
+                      </option>
+                    ))
+                )}
               </select>
             </div>
             <div className="search-toggle">

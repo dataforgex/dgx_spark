@@ -48,17 +48,20 @@ interface SystemMetrics {
   timestamp: number
 }
 
-interface ModelStatus {
-  name: string
-  port: number
-  healthy: boolean
-  responseTime: number | null
-}
-
 interface DockerContainer {
   name: string
   status: string
   ports: string
+}
+
+interface ManagedModel {
+  id: string
+  name: string
+  engine: string
+  port: number
+  status: string
+  container_name: string
+  memory_mb: number | null
 }
 
 export function Dashboard() {
@@ -76,13 +79,20 @@ export function Dashboard() {
     }
     return []
   })
-  const [modelStatus, setModelStatus] = useState<ModelStatus[]>([])
   const [containers, setContainers] = useState<DockerContainer[]>([])
+  const [managedModels, setManagedModels] = useState<ManagedModel[]>([])
+  const [modelActions, setModelActions] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   // Use the current hostname instead of hardcoded localhost
-  const API_BASE = `http://${window.location.hostname}:5174`
+  // Use 127.0.0.1 for localhost to avoid IPv6 resolution issues
+  const getApiHost = () => {
+    const hostname = window.location.hostname;
+    return hostname === 'localhost' ? '127.0.0.1' : hostname;
+  };
+  const API_BASE = `http://${getApiHost()}:5174`
+  const MODEL_MANAGER_API = `http://${getApiHost()}:5175`
 
   useEffect(() => {
     const fetchMetrics = async () => {
@@ -109,17 +119,6 @@ export function Dashboard() {
       }
     }
 
-    const fetchModelStatus = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/api/models`)
-        if (!response.ok) throw new Error('Failed to fetch model status')
-        const data: ModelStatus[] = await response.json()
-        setModelStatus(data)
-      } catch (err) {
-        console.error('Failed to fetch model status:', err)
-      }
-    }
-
     const fetchContainers = async () => {
       try {
         const response = await fetch(`${API_BASE}/api/containers`)
@@ -131,19 +130,64 @@ export function Dashboard() {
       }
     }
 
+    const fetchManagedModels = async () => {
+      try {
+        const response = await fetch(`${MODEL_MANAGER_API}/api/models`)
+        if (!response.ok) throw new Error('Failed to fetch managed models')
+        const data: ManagedModel[] = await response.json()
+        setManagedModels(data)
+      } catch (err) {
+        console.error('Failed to fetch managed models:', err)
+      }
+    }
+
     fetchMetrics()
-    fetchModelStatus()
     fetchContainers()
+    fetchManagedModels()
     setLoading(false)
 
     const interval = setInterval(() => {
       fetchMetrics()
-      fetchModelStatus()
       fetchContainers()
-    }, 1000) // Update every 1 second for real-time monitoring
+      fetchManagedModels()
+    }, 5000) // Update every 5 seconds
 
     return () => clearInterval(interval)
-  }, [API_BASE])
+  }, [API_BASE, MODEL_MANAGER_API])
+
+  const handleStartModel = async (modelId: string) => {
+    setModelActions(prev => ({ ...prev, [modelId]: true }))
+    try {
+      const response = await fetch(`${MODEL_MANAGER_API}/api/models/${modelId}/start`, {
+        method: 'POST'
+      })
+      if (!response.ok) {
+        const error = await response.json()
+        alert(`Failed to start model: ${error.detail}`)
+      }
+    } catch (err) {
+      alert(`Failed to start model: ${err}`)
+    } finally {
+      setModelActions(prev => ({ ...prev, [modelId]: false }))
+    }
+  }
+
+  const handleStopModel = async (modelId: string) => {
+    setModelActions(prev => ({ ...prev, [modelId]: true }))
+    try {
+      const response = await fetch(`${MODEL_MANAGER_API}/api/models/${modelId}/stop`, {
+        method: 'POST'
+      })
+      if (!response.ok) {
+        const error = await response.json()
+        alert(`Failed to stop model: ${error.detail}`)
+      }
+    } catch (err) {
+      alert(`Failed to stop model: ${err}`)
+    } finally {
+      setModelActions(prev => ({ ...prev, [modelId]: false }))
+    }
+  }
 
   if (loading) {
     return <div className="dashboard-loading">Loading dashboard...</div>
@@ -422,29 +466,58 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* vLLM Model Status */}
+        {/* Model Manager */}
         <div className="dashboard-row">
           <div className="card full">
-            <h2>vLLM Model Servers</h2>
-            <div className="model-status-grid">
-              {modelStatus.map(model => (
-                <div key={model.port} className="model-card">
-                  <div className="model-name">{model.name}</div>
-                  <div className={`model-health ${model.healthy ? 'healthy' : 'unhealthy'}`}>
-                    {model.healthy ? '✓ Online' : '✗ Offline'}
+            <h2>Model Manager</h2>
+            <div className="model-manager-grid">
+              {managedModels.map(model => (
+                <div key={model.id} className={`managed-model-card ${model.status}`}>
+                  <div className="managed-model-header">
+                    <div className="managed-model-name">{model.name}</div>
+                    <span className={`engine-badge ${model.engine}`}>{model.engine.toUpperCase()}</span>
                   </div>
-                  <div className="model-info">
-                    <span>Port:</span>
-                    <span style={{ color: 'var(--text-primary)' }}>{model.port}</span>
+                  <div className={`managed-model-status ${model.status}`}>
+                    {model.status === 'running' ? '● Running' : model.status === 'starting' ? '◐ Starting' : '○ Stopped'}
                   </div>
-                  {model.responseTime && (
-                    <div className="model-info">
-                      <span>Response:</span>
-                      <span style={{ color: 'var(--text-primary)' }}>{model.responseTime}ms</span>
+                  <div className="managed-model-details">
+                    <div className="detail-row">
+                      <span>Port:</span>
+                      <span>{model.port}</span>
                     </div>
-                  )}
+                    {model.memory_mb && (
+                      <div className="detail-row">
+                        <span>Memory:</span>
+                        <span>{model.memory_mb >= 1024 ? `${(model.memory_mb / 1024).toFixed(1)} GB` : `${model.memory_mb} MB`}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="managed-model-actions">
+                    {model.status === 'running' ? (
+                      <button
+                        className="model-btn stop"
+                        onClick={() => handleStopModel(model.id)}
+                        disabled={modelActions[model.id]}
+                      >
+                        {modelActions[model.id] ? 'Stopping...' : 'Stop'}
+                      </button>
+                    ) : (
+                      <button
+                        className="model-btn start"
+                        onClick={() => handleStartModel(model.id)}
+                        disabled={modelActions[model.id]}
+                      >
+                        {modelActions[model.id] ? 'Starting...' : 'Start'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
+              {managedModels.length === 0 && (
+                <div className="no-models">
+                  Model Manager API not available. Start it with: <code>./model-manager/serve.sh</code>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -294,11 +294,11 @@ def fetch_page_summary(url: str) -> Optional[str]:
 
 
 if __name__ == "__main__":
-    print("🚀 Starting DGX Spark Metrics API on http://localhost:5174")
-    print("📊 Endpoints:")
+    print("Starting DGX Spark Metrics API on http://localhost:5174")
+    print("Endpoints:")
     print("  - GET /api/metrics     - System and GPU metrics")
-    print("  - GET /api/models      - vLLM model server status")
+    print("  - GET /api/models      - Model server status")
     print("  - GET /api/containers  - Docker container status")
-    print("  - POST /api/search     - Web search (DuckDuckGo) with page scraping for time queries")
+    print("  - POST /api/search     - Web search (SearXNG)")
     print("  - GET /health          - Health check")
     uvicorn.run(app, host="0.0.0.0", port=5174)

@@ -9,25 +9,24 @@
 |-------|--------|------|--------------|--------------|
 | Qwen3-30B-A3B-FP4 | TRT-LLM | 8202 | MoE (3B active) | FP4 |
 | Qwen3-32B-FP4 | TRT-LLM | 8203 | Dense (32B active) | FP4 |
-| Qwen3-Coder-30B | vLLM | 8100 | MoE | Full precision |
-| Qwen3-Coder-30B-AWQ | vLLM | 8104 | MoE | AWQ 4-bit |
+| Qwen3-Coder-30B-AWQ | vLLM | 8104 | MoE (3B active) | AWQ 4-bit |
 
 ## Benchmark Configuration
 
 - **Iterations per test:** 3
 - **Streaming mode:** Enabled (for accurate TTFT measurement)
 - **Prompt types:** Short (~20 tokens), Medium (~50 tokens), Long (~100 tokens)
+- **Standard settings:** 32K context, 8 concurrent, 0.3 GPU memory fraction
 
 ## Results Summary
 
-| Model | Engine | TTFT (s) | TPS | Memory |
-|-------|--------|----------|-----|--------|
-| Qwen3-30B-A3B-FP4 (MoE) | TRT-LLM | **0.051** | 34.9 | ~12.8 GB |
-| Qwen3-32B-FP4 (Dense) | TRT-LLM | 0.106 | 8.3 | ~47 GB |
-| Qwen3-Coder-30B (Full) | vLLM | 0.316 | 28.2 | ~68 GB |
-| Qwen3-Coder-30B-AWQ | vLLM | 0.050* | **58.6** | ~10 GB |
+| Model | Engine | TTFT (s) | TPS | Model Size | Runtime Memory |
+|-------|--------|----------|-----|------------|----------------|
+| Qwen3-30B-A3B-FP4 (MoE) | TRT-LLM | **0.054** | 32.0 | ~12.8 GB | ~33 GB |
+| Qwen3-32B-FP4 (Dense) | TRT-LLM | 0.113 | 7.8 | ~47 GB | ~44 GB |
+| Qwen3-Coder-30B-AWQ (MoE) | vLLM | 0.069 | **52.0** | ~17 GB | ~34 GB |
 
-*After warmup (first request ~1.5s due to CUDA graph compilation)
+All tests use: 32K context, 8 concurrent sequences, 0.3-0.85 GPU memory fraction
 
 ## Detailed Results
 
@@ -35,35 +34,27 @@
 
 | Prompt | TTFT (s) | TPS | Total Time (s) |
 |--------|----------|-----|----------------|
-| Short | 0.035 ± 0.011 | 38.8 ± 1.7 | 3.10 |
-| Medium | 0.054 ± 0.008 | 35.4 ± 2.9 | 7.06 |
-| Long | 0.063 ± 0.004 | 30.6 ± 0.9 | 17.11 |
+| Short | 0.088 | 32.2 | 3.20 |
+| Medium | 0.055 | 32.0 | 3.18 |
+| Long | 0.054 | 32.1 | 3.17 |
 
 ### TRT-LLM Qwen3-32B-FP4 (Dense)
 
 | Prompt | TTFT (s) | TPS | Total Time (s) |
 |--------|----------|-----|----------------|
-| Short | 0.064 ± 0.002 | 8.9 ± 0.3 | 12.70 |
-| Medium | 0.107 ± 0.003 | 8.3 ± 0.3 | 29.93 |
-| Long | 0.146 ± 0.011 | 7.8 ± 0.3 | 68.74 |
+| Short | 0.118 ± 0.009 | 7.8 ± 0.2 | 13.22 |
+| Medium | 0.110 ± 0.006 | 7.8 ± 0.0 | 39.46 |
+| Long | 0.112 ± 0.005 | 7.8 ± 0.0 | 66.11 |
 
-### vLLM Qwen3-Coder-30B (Full Precision)
-
-| Prompt | TTFT (s) | TPS | Total Time (s) |
-|--------|----------|-----|----------------|
-| Short | 0.228 ± 0.042 | 30.7 ± 1.7 | 4.04 |
-| Medium | 0.353 ± 0.054 | 27.9 ± 1.2 | 9.45 |
-| Long | 0.367 ± 0.034 | 26.1 ± 0.7 | 19.20 |
-
-### vLLM Qwen3-Coder-30B-AWQ (Optimized)
+### vLLM Qwen3-Coder-30B-AWQ (MoE)
 
 | Prompt | TTFT (s) | TPS | Total Time (s) |
 |--------|----------|-----|----------------|
-| Short | 0.544 ± 0.852 | 67.0 ± 0.4 | 2.34 |
-| Medium | 0.050 ± 0.017 | 51.2 ± 1.3 | 5.44 |
-| Long | 0.064 ± 0.028 | 57.6 ± 0.7 | 8.88 |
+| Short | 0.074 | 52.5 | 1.98 |
+| Medium | 0.069 | 51.4 | 1.55 |
+| Long | 0.070 | 52.0 | 2.00 |
 
-Note: Short prompt TTFT variance is due to first-request warmup (1.5s), subsequent requests are 0.050-0.056s.
+Note: First request has ~1-2s warmup due to CUDA graph compilation.
 
 ## Key Findings
 
@@ -71,60 +62,75 @@ Note: Short prompt TTFT variance is due to first-request warmup (1.5s), subseque
 
 The MoE (Mixture of Experts) architecture significantly outperforms dense models:
 
-- **TRT-LLM 30B MoE**: 34.9 TPS with only 3B active parameters
-- **TRT-LLM 32B Dense**: 8.3 TPS with all 32B parameters active
+- **30B MoE**: 32-52 TPS with only 3B active parameters
+- **32B Dense**: 8.3 TPS with all 32B parameters active
 
-MoE provides **4.2x faster inference** while using less memory.
+MoE provides **4-6x faster inference** while using less memory.
 
-### 2. AWQ Quantization Impact on vLLM
+### 2. TRT-LLM vs vLLM (Same Settings)
 
-Optimizing vLLM with AWQ quantization and higher memory utilization delivered:
+| Metric | TRT-LLM MoE | vLLM AWQ | Winner |
+|--------|-------------|----------|--------|
+| TTFT | **0.054s** | 0.069s | TRT-LLM (28% faster) |
+| TPS | 32 | **52** | vLLM (63% faster) |
+| Memory | ~33 GB | ~34 GB | Tie |
 
-- **2x faster TPS**: 58.6 vs 28.2 tokens/second
-- **6x faster TTFT**: 0.050s vs 0.316s (after warmup)
-- **85% less memory**: ~10 GB vs ~68 GB
-
-### 3. TRT-LLM vs vLLM
-
-| Metric | Winner | Notes |
-|--------|--------|-------|
-| TTFT | TRT-LLM MoE | 0.051s - consistently fastest first token |
-| TPS | vLLM AWQ | 58.6 TPS - highest throughput |
-| Memory | vLLM AWQ | ~10 GB - most efficient |
-
-### 4. When to Use Each Model
+### 3. When to Use Each Model
 
 | Use Case | Recommended Model | Why |
 |----------|-------------------|-----|
-| Interactive chat | TRT-LLM 30B MoE | Fastest TTFT (0.051s) |
-| Batch processing | vLLM AWQ | Highest TPS (58.6) |
-| Memory constrained | vLLM AWQ | Only ~10 GB |
+| Interactive chat | TRT-LLM 30B MoE | Fastest TTFT (0.054s) |
+| Batch processing | vLLM AWQ | Highest TPS (52) |
+| Memory constrained | Either MoE model | Both ~33-34 GB |
 | Complex reasoning | TRT-LLM 32B Dense | All 32B params active |
 
-## Optimization Techniques Applied
+## Configuration
 
-### vLLM AWQ Configuration
+### vLLM AWQ (`vllm-qwen3-coder-30b-awq/serve.sh`)
 
 ```bash
-MODEL_NAME="cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit"
-GPU_MEMORY_UTILIZATION=0.85  # Increased from 0.55
-ENABLE_PREFIX_CACHING=true
-ENABLE_CHUNKED_PREFILL=true
+MAX_MODEL_LEN=32768              # 32K context
+MAX_NUM_SEQS=8                   # 8 concurrent sequences
+GPU_MEMORY_UTILIZATION=0.30      # ~34 GB runtime
 ```
 
-Key changes:
-- AWQ 4-bit quantization reduces model size and memory bandwidth
-- Higher GPU memory utilization (0.85) allows more KV cache
-- More KV cache enables better batching and throughput
+Features:
+- AWQ 4-bit quantization (model weights ~17 GB)
+- Prefix caching enabled
+- Chunked prefill enabled
 
-### TRT-LLM Configuration
+### TRT-LLM FP4 (`trtllm-qwen3-30b-fp4/serve.sh`)
+
+```bash
+MAX_BATCH_SIZE=8                 # 8 concurrent sequences
+MAX_SEQ_LEN=32768                # 32K context
+```
 
 ```yaml
 kv_cache_config:
   dtype: auto
-  free_gpu_memory_fraction: 0.9
+  free_gpu_memory_fraction: 0.3  # ~33 GB runtime
 cuda_graph_config:
   enable_padding: true
+```
+
+### Recommended Settings
+
+The default `serve.sh` scripts use optimized settings for DGX Spark:
+
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| Context | 32K | Full context for complex tasks |
+| Concurrent | 8 | Good balance of throughput and memory |
+| GPU Memory | 0.3 | ~33-34 GB, leaves room for other tasks |
+
+## DGX Spark / GB10 Notes
+
+**FP8 KV Cache:** Not yet supported on GB10/Blackwell in vLLM. TRT-LLM handles this automatically.
+
+**Unified Memory Architecture (UMA):** The GB10 shares 128GB RAM between CPU and GPU. Clear page cache before loading large models:
+```bash
+sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
 ```
 
 ## Glossary
@@ -132,14 +138,14 @@ cuda_graph_config:
 - **TTFT (Time to First Token)**: Latency before first token is generated. Lower is better for interactive use.
 - **TPS (Tokens Per Second)**: Output generation throughput. Higher is better for batch processing.
 - **MoE (Mixture of Experts)**: Architecture where only a subset of parameters are active per token.
-- **AWQ (Activation-aware Weight Quantization)**: Quantization that preserves important weights based on activation patterns.
+- **AWQ (Activation-aware Weight Quantization)**: 4-bit quantization that preserves important weights.
 - **FP4**: 4-bit floating point quantization used by TensorRT-LLM.
+- **Runtime Memory**: Actual GPU memory used during inference (model weights + KV cache + overhead).
 
 ## Port Reference
 
-| Port | Model | Engine |
-|------|-------|--------|
-| 8100 | Qwen3-Coder-30B | vLLM |
-| 8104 | Qwen3-Coder-30B-AWQ | vLLM |
-| 8202 | Qwen3-30B-A3B-FP4 | TRT-LLM |
-| 8203 | Qwen3-32B-FP4 | TRT-LLM |
+| Port | Model | Engine | Memory | Context | Concurrent |
+|------|-------|--------|--------|---------|------------|
+| 8104 | Qwen3-Coder-30B-AWQ | vLLM | ~34 GB | 32K | 8 |
+| 8202 | Qwen3-30B-A3B-FP4 | TRT-LLM | ~33 GB | 32K | 8 |
+| 8203 | Qwen3-32B-FP4 (Dense) | TRT-LLM | ~44 GB | 32K | 8 |

@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# vLLM Server - Qwen3-Coder-30B AWQ Optimized
-# Changes from original:
-# - AWQ 4-bit quantization (~4x less memory)
-# - Higher GPU memory utilization (0.85 vs 0.55)
-# - Optimized for single-model deployment
+# vLLM Server - Qwen3-Coder-30B AWQ
+# Optimized for DGX Spark (GB10 Blackwell)
+#
+# Settings: 32K context, 8 concurrent, ~34 GB memory
+# Performance: 0.069s TTFT, 52 TPS
 
 # ==============================================================================
 # Configuration Variables
@@ -12,20 +12,27 @@
 
 CONTAINER_NAME="vllm-qwen3-coder-30b-awq"
 
-# AWQ quantized model - ~4x smaller than full precision
+# AWQ quantized model
 MODEL_NAME="cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit"
-PORT=8104  # New port for optimized version
+PORT=8104
 
 # Cache directory
 HF_CACHE_DIR="${HOME}/.cache/huggingface"
 mkdir -p "${HF_CACHE_DIR}"
 
-# Context and concurrency
+# Context and concurrency - optimized for DGX Spark
 MAX_MODEL_LEN=32768              # 32K context
-MAX_NUM_SEQS=256                 # Concurrent sequences
+MAX_NUM_SEQS=8                   # 8 concurrent sequences
 
-# OPTIMIZATION: Higher memory utilization (was 0.55)
-GPU_MEMORY_UTILIZATION=0.85      # Use 85% of GPU - more KV cache
+# GPU memory utilization - sized for 8 concurrent 32K sequences
+# Note: 0.9 would pre-allocate 90% regardless of need
+# With 8 seqs @ 32K, we need ~25-30GB total (model + KV cache)
+GPU_MEMORY_UTILIZATION=0.3
+
+# FP8 KV Cache - NOT YET SUPPORTED on GB10/Blackwell
+# vLLM V1 engine doesn't support fp8 kv cache, V0 uses incompatible Hopper kernels
+# TODO: Re-enable when vLLM adds Blackwell FP8 KV cache support
+KV_CACHE_DTYPE="auto"
 
 # Performance flags
 ENABLE_PREFIX_CACHING=true
@@ -36,9 +43,19 @@ DTYPE="auto"
 ENABLE_AUTO_TOOL_CHOICE=true
 TOOL_CALL_PARSER="qwen3_coder"
 
-# Quantization: auto-detect from model config
-# (Model uses compressed-tensors format)
-QUANTIZATION=""
+# ==============================================================================
+# DGX Spark UMA Optimization: Clear system page cache
+# Recommended by NVIDIA for unified memory systems
+# ==============================================================================
+
+echo "Clearing system page cache (recommended for DGX Spark UMA)..."
+if [ -w /proc/sys/vm/drop_caches ]; then
+    sync
+    echo 3 > /proc/sys/vm/drop_caches
+    echo "Page cache cleared."
+else
+    echo "Note: Run 'sudo sh -c \"sync; echo 3 > /proc/sys/vm/drop_caches\"' for optimal performance"
+fi
 
 # ==============================================================================
 # Check if container exists
@@ -76,6 +93,7 @@ DOCKER_CMD="docker run -d \
   --max-model-len ${MAX_MODEL_LEN} \
   --max-num-seqs ${MAX_NUM_SEQS} \
   --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION} \
+  --kv-cache-dtype ${KV_CACHE_DTYPE} \
   --dtype ${DTYPE}"
 
 # Add optional features
@@ -98,19 +116,14 @@ fi
 echo "=================================================="
 echo "Starting vLLM Server - Qwen3-Coder-30B AWQ"
 echo "=================================================="
-echo "Container Name: ${CONTAINER_NAME}"
+echo "Container: ${CONTAINER_NAME}"
 echo "Model: ${MODEL_NAME}"
 echo "Port: ${PORT}"
-echo "Quantization: ${QUANTIZATION}"
-echo "Max Context: ${MAX_MODEL_LEN}"
+echo "Context: ${MAX_MODEL_LEN} tokens"
+echo "Concurrent: ${MAX_NUM_SEQS} sequences"
 echo "GPU Memory: ${GPU_MEMORY_UTILIZATION}"
-echo "Cache: ${HF_CACHE_DIR}"
+echo "Expected RAM: ~34 GB"
 echo "=================================================="
-echo ""
-echo "OPTIMIZATIONS vs original:"
-echo "  - AWQ 4-bit quantization (~4x less memory)"
-echo "  - GPU memory: 85% (was 55%)"
-echo "  - More KV cache for longer contexts"
 echo ""
 
 eval $DOCKER_CMD
