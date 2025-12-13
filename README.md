@@ -1,222 +1,100 @@
-# DGX Spark - Multi-Model LLM Serving with vLLM
+# DGX Spark - Multi-Model LLM Serving
 
-Complete multi-model infrastructure for serving local LLMs using vLLM with OpenAI-compatible API and multiple client interfaces.
+Local LLM infrastructure for DGX Spark (GB10 Blackwell) with vLLM, web UI, and model management.
 
 ## Quick Start
 
-### 1. Start the vLLM Servers
-
-**Text/Code Model:**
-```bash
-cd vllm-qwen3-coder-30b
-./serve.sh
-```
-
-**Vision Model (Qwen2-VL-7B):**
-```bash
-cd vllm-qwen2-vl-7b
-./serve.sh
-```
-
-**Vision Model (Qwen3-VL-30B) - Using Transformers:**
-```bash
-cd vllm-qwen3-vl-30b
-./start_docker_transformers.sh
-```
-⚠️ **Note**: This model uses Transformers instead of vLLM due to compatibility issues. See `vllm-qwen3-vl-30b/TROUBLESHOOTING.md` for details.
-
-**Server Info:**
-- **Port 8100**: Qwen3-Coder-30B (text/code generation)
-- **Port 8101**: Qwen2-VL-7B (vision/image understanding)
-- **Port 8102**: Qwen3-VL-30B (advanced vision/image understanding)
-- **Startup time**: ~8 minutes (cached), ~15 minutes (first run)
-- **API**: http://localhost:8100/v1 and http://localhost:8101/v1
-
-### 2. Access the Web Interface
-
-#### 🌐 Web GUI (Recommended)
-
-The easiest way to start the interface is using the all-in-one script:
+### 1. Start the Web GUI & Model Manager
 
 ```bash
 cd web-gui
-./start-all.sh
+./start-docker.sh
 ```
 
-**Access the interface:**
-- **Dashboard**: http://localhost:5173/dashboard - Real-time GPU, system, and model monitoring
-- **Chat**: http://localhost:5173/chat - Interactive chat with the models
+Access at:
+- **Dashboard**: http://localhost:5173 - Model management, GPU monitoring
+- **Chat**: http://localhost:5173/chat - Interactive chat with web search
 
-**New Features:**
-- **Web Search**: Real-time internet access using DuckDuckGo with intelligent page scraping.
-- **Multi-Model Chat**: Switch seamlessly between all running models.
-- **System Monitoring**: Live GPU and container metrics.
+### 2. Start a Model
 
-#### 🐍 Python CLI
+Use the Dashboard UI to start/stop models, or manually:
+
 ```bash
-cd python
-./start_chat.sh
+cd vllm-qwen3-coder-30b-awq
+./serve.sh
 ```
 
-#### 📘 TypeScript CLI
-```bash
-cd typescript
-./start_chat.sh
-```
+## Available Models
+
+| Model | Engine | Port | Use Case |
+|-------|--------|------|----------|
+| Qwen3-Coder-30B | vLLM | 8100 | Code generation |
+| Qwen2-VL-7B | vLLM | 8101 | Vision/images |
+| Ministral-3-14B | vLLM | 8103 | General chat |
+| Qwen3-Coder-30B-AWQ | vLLM | 8104 | Code + tool calling |
+| Qwen3-VL-32B | Ollama | 11435 | Advanced vision |
+
+**Recommended**: `qwen3-coder-30b-awq` - Best balance of speed (52 TPS) and features (tool calling for web search).
 
 ## Project Structure
 
 ```
 dgx_spark/
-├── vllm-qwen3-coder-30b/    # Text/code model server (port 8100)
-├── vllm-qwen2-vl-7b/         # Vision model server (port 8101)
-├── web-gui/                  # React web interface (port 5173)
-├── python/                   # Python CLI client
-├── typescript/               # TypeScript CLI client
-└── project_summary.md        # Complete documentation
+├── web-gui/                    # React dashboard + chat (port 5173)
+├── model-manager/              # Model start/stop API (port 5175)
+├── models.json                 # Centralized model configuration
+├── vllm-qwen3-coder-30b/       # Text/code model
+├── vllm-qwen3-coder-30b-awq/   # AWQ quantized (fastest)
+├── vllm-qwen2-vl-7b/           # Vision model
+├── vllm-ministral3-14b/        # Mistral model
+├── searxng/                    # Local search engine
+├── benchmarks/                 # Performance benchmarks
+└── docs/                       # Documentation
 ```
 
-## Components
-
-### vLLM Servers
-
-**Qwen3-Coder-30B (Text/Code):**
-- **Container:** `vllm-qwen3-coder-30b`
-- **Port:** 8100
-- **GPU Memory:** 55% (~65 GB)
-- **Use Cases:** Code generation, text analysis, structured outputs
-- **Manage:** `docker stop/start/restart vllm-qwen3-coder-30b`
-
-**Qwen2-VL-7B (Vision):**
-- **Container:** `vllm-qwen2-vl-7b`
-- **Port:** 8101
-- **GPU Memory:** 25% (~26 GB)
-- **Use Cases:** Image understanding, OCR, PDF/Excel processing, visual Q&A
-- **Manage:** `docker stop/start/restart vllm-qwen2-vl-7b`
-
-**Qwen3-VL-30B (Advanced Vision):**
-- **Container:** `vllm-qwen3-vl-30b`
-- **Port:** 8102
-- **GPU Memory:** 55% (~65 GB)
-- **Use Cases:** Advanced image understanding, complex visual reasoning, video analysis
-- **Manage:** `docker stop/start/restart vllm-qwen3-vl-30b`
+## Features
 
 ### Web GUI
-- **Dashboard**: Real-time monitoring of GPU metrics, temperatures, power, vLLM server status, and Docker containers
-- **Chat**: Interactive chat interface with dark mode and animations
-- **Web Search**: Integrated DuckDuckGo search with page scraping for real-time answers
-- Built with React + TypeScript + Vite + Chart.js
-- Updates every 5 seconds
-- Navigation between Dashboard and Chat views
+- **Model Manager**: Start/stop models from the dashboard
+- **GPU Monitoring**: Real-time VRAM, temperature, power usage
+- **Chat Interface**: Multi-model chat with streaming responses
+- **Web Search**: SearXNG integration for real-time information
+- **Image Support**: Upload images for vision models
 
-### CLI Clients
-- **Python:** Streaming responses, history management
-- **TypeScript:** Interactive terminal, type-safe
+### Model Management
+- Centralized config in `models.json`
+- Docker-based model serving
+- Automatic container lifecycle management
+- Health checks and status monitoring
 
-## Managing the Servers
-
-```bash
-# Stop both models
-docker stop vllm-qwen3-coder-30b vllm-qwen2-vl-7b
-
-# Start individual models (fast - uses cached models)
-docker start vllm-qwen3-coder-30b
-docker start vllm-qwen2-vl-7b
-
-# Restart
-docker restart vllm-qwen3-coder-30b
-docker restart vllm-qwen2-vl-7b
-
-# View logs
-docker logs -f vllm-qwen3-coder-30b
-docker logs -f vllm-qwen2-vl-7b
-
-# Check GPU usage
-nvidia-smi
+### Web Search (Tool Calling)
+Models with tool calling support can search the web:
+```
+User: What's the weather in Tokyo today?
+Assistant: [searches web] Based on current data...
 ```
 
-## Adding New Models
+Requires:
+1. SearXNG running: `cd searxng && docker compose up -d`
+2. Model with tool calling (e.g., qwen3-coder-30b-awq)
+3. Search toggle enabled in chat
 
-1. Copy the template:
-   ```bash
-   cp -r vllm-qwen3-coder-30b vllm-{new-model}
-   ```
+## API Usage
 
-2. Edit `serve.sh`:
-   - Update `CONTAINER_NAME`
-   - Update `MODEL_NAME`
-   - Update `PORT` (use 8102, 8103, etc.)
-   - Adjust `GPU_MEMORY_UTILIZATION` (ensure total < 0.85)
-
-3. Start the new model:
-   ```bash
-   cd vllm-{new-model}
-   ./serve.sh
-   ```
-
-All models share the same cache directory - downloads happen only once!
-
-**Current GPU Allocation:**
-- Qwen3-Coder-30B: 55%
-- Qwen2-VL-7B: 25%
-- Total: 80% (20% safety margin)
-
-## Configuration
-
-**Current Multi-Model Setup:**
-
-**Qwen3-Coder-30B:**
-- **API URL:** http://localhost:8100/v1
-- **Model:** Qwen/Qwen3-Coder-30B-A3B-Instruct
-- **Context Length:** 32,768 tokens
-- **Max Concurrent Requests:** 256
-- **GPU Memory:** 55% (~65 GB)
-
-**Qwen2-VL-7B:**
-- **API URL:** http://localhost:8101/v1
-- **Model:** Qwen/Qwen2-VL-7B-Instruct
-- **Context Length:** 32,768 tokens
-- **Max Concurrent Requests:** 64
-- **GPU Memory:** 25% (~26 GB)
-
-## Use Cases
-
-**Qwen3-Coder-30B:**
-- Code generation and analysis
-- Mind map creation (JSON/Markdown)
-- Data processing and transformation
-- Complex reasoning tasks
-
-**Qwen2-VL-7B:**
-- Image description and understanding
-- OCR / text extraction from images
-- PDF document processing (via screenshots)
-- Excel/table understanding (via screenshots)
-- Visual question answering
-
-**Combined Pipeline:**
-1. Use Qwen2-VL to extract text from images/PDFs
-2. Use Qwen3-Coder to analyze/transform extracted text
-
-## API Examples
-
-### Text/Code Generation (Port 8100)
+### Chat Completion
 
 ```bash
-curl http://localhost:8100/v1/chat/completions \
+curl http://localhost:8104/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
-    "messages": [
-      {"role": "user", "content": "Write a Python function to check if a number is prime"}
-    ],
+    "model": "cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit",
+    "messages": [{"role": "user", "content": "Hello!"}],
     "max_tokens": 500
   }'
 ```
 
-### Vision Understanding (Port 8101)
+### Vision (Image Input)
 
-**Image from URL:**
 ```bash
 curl http://localhost:8101/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -225,7 +103,7 @@ curl http://localhost:8101/v1/chat/completions \
     "messages": [{
       "role": "user",
       "content": [
-        {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}},
         {"type": "text", "text": "Describe this image"}
       ]
     }],
@@ -233,84 +111,100 @@ curl http://localhost:8101/v1/chat/completions \
   }'
 ```
 
-**Local Image (Base64):**
-```bash
-IMAGE_B64=$(base64 -w 0 image.jpg)
+## Managing Models
 
-curl http://localhost:8101/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen/Qwen2-VL-7B-Instruct",
-    "messages": [{
-      "role": "user",
-      "content": [
-        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,'$IMAGE_B64'"}},
-        {"type": "text", "text": "Extract all text from this image"}
-      ]
-    }],
-    "max_tokens": 500
-  }'
+### Via Dashboard (Recommended)
+1. Open http://localhost:5173
+2. Click Start/Stop buttons for each model
+
+### Via Command Line
+```bash
+# Start
+cd vllm-qwen3-coder-30b-awq && ./serve.sh
+
+# Stop
+docker stop vllm-qwen3-coder-30b-awq
+
+# Logs
+docker logs -f vllm-qwen3-coder-30b-awq
+
+# GPU usage
+nvidia-smi
 ```
+
+## Adding New Models
+
+1. Create folder: `vllm-{model-name}/`
+2. Add to `models.json`:
+```json
+"model-key": {
+  "name": "Display Name",
+  "engine": "vllm",
+  "port": 8105,
+  "container_name": "vllm-model-name",
+  "image": "nvcr.io/nvidia/vllm:25.09-py3",
+  "model_id": "org/model-name",
+  "settings": {
+    "max_num_seqs": 8,
+    "max_model_len": 32768,
+    "gpu_memory_utilization": 0.3
+  }
+}
+```
+3. Create `serve.sh` (copy from existing model)
+4. Restart model-manager: `docker restart model-manager`
+
+## Performance
+
+Benchmarked on DGX Spark (GB10 Blackwell, 128GB unified memory):
+
+| Model | TPS | TTFT | Memory |
+|-------|-----|------|--------|
+| Qwen3-Coder-30B-AWQ (vLLM) | **52** | 0.069s | ~34 GB |
+| Qwen3-30B-FP4 (TRT-LLM)* | 32 | 0.054s | ~33 GB |
+
+*TRT-LLM removed due to bugs and missing features. See [docs/TRTLLM_ISSUES.md](docs/TRTLLM_ISSUES.md).
 
 ## Troubleshooting
 
-### Out of Memory Errors
+### Model Won't Start
+```bash
+# Check if port is in use
+ss -tlnp | grep 8104
+
+# Check container logs
+docker logs vllm-qwen3-coder-30b-awq
+
+# Remove stuck container
+docker rm -f vllm-qwen3-coder-30b-awq
+```
+
+### Out of Memory
 ```bash
 # Check GPU usage
 nvidia-smi
 
-# If OOM occurs:
-# 1. Stop both models
-docker stop vllm-qwen3-coder-30b vllm-qwen2-vl-7b
-
-# 2. Reduce GPU memory in serve.sh files:
-#    - Qwen3-Coder: GPU_MEMORY_UTILIZATION=0.5 (down from 0.55)
-#    - Qwen2-VL: GPU_MEMORY_UTILIZATION=0.2 (down from 0.25)
-
-# 3. Restart models
-cd vllm-qwen3-coder-30b && ./serve.sh
-cd vllm-qwen2-vl-7b && ./serve.sh
+# Reduce memory in serve.sh
+GPU_MEMORY_UTILIZATION=0.25  # Lower value
 ```
 
-### Container Won't Start
-```bash
-# Check if port is in use
-lsof -i :8100
-lsof -i :8101
-
-# View container logs
-docker logs vllm-qwen3-coder-30b
-docker logs vllm-qwen2-vl-7b
-
-# Remove stuck containers
-docker rm -f vllm-qwen3-coder-30b vllm-qwen2-vl-7b
-```
-
-### Slow Performance
-- Enable caching (already enabled in serve.sh)
-- Reduce concurrent sequences if needed
-- Ensure models are cached (check startup logs)
-- Check GPU utilization: `nvidia-smi`
+### Web Search Not Working
+1. Ensure SearXNG is running: `docker ps | grep searxng`
+2. Check search toggle is enabled in chat
+3. Use a model with tool calling support
 
 ## Requirements
 
-- **GPU:** NVIDIA with 93+ GiB VRAM (for both models)
-- **Docker:** With NVIDIA container runtime
-- **Node.js:** v18+ (for web-gui and TypeScript client)
-- **Python:** 3.x (for Python client)
+- **Hardware**: DGX Spark or NVIDIA GPU with 64+ GB VRAM
+- **Docker**: With NVIDIA container runtime
+- **Node.js**: v18+ (for web GUI development)
 
-## Current Status
+## Services
 
-✅ Qwen3-Coder-30B: Running on port 8100 (text/code)
-✅ Qwen2-VL-7B: Running on port 8101 (vision)
-✅ Web GUI: Running on port 5173 (with Web Search)
-✅ Model Cache: Active (shared across models)
-✅ APIs: Fully operational
-✅ Total GPU Usage: ~80% (~93 GB)
-✅ Multi-model serving: Operational
-
----
-
-**Need help?** Check the individual model READMEs:
-- [vllm-qwen3-coder-30b/README.md](vllm-qwen3-coder-30b/README.md) - Text/code model details
-- [vllm-qwen2-vl-7b/README.md](vllm-qwen2-vl-7b/README.md) - Vision model details
+| Service | Port | Description |
+|---------|------|-------------|
+| Web GUI | 5173 | Dashboard and chat |
+| Metrics API | 5174 | GPU/system metrics |
+| Model Manager | 5175 | Model lifecycle API |
+| SearXNG | 8888 | Local search engine |
+| Models | 8100-8104 | vLLM inference servers |
