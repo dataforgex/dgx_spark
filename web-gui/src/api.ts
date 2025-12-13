@@ -56,6 +56,36 @@ export const AVAILABLE_MODELS: Record<string, ModelConfig> = {
     modelId: 'qwen3-vl:32b',
     maxTokens: 2048,
   },
+  'qwen2.5-vl-7b-fp8': {
+    name: 'Qwen2.5-VL-7B-FP8 (TRT-LLM)',
+    apiUrl: 'http://192.168.1.89:8200/v1/chat/completions',
+    modelId: 'nvidia/Qwen2.5-VL-7B-Instruct-FP8',
+    maxTokens: 2048,
+  },
+  'qwen2.5-vl-7b-fp4': {
+    name: 'Qwen2.5-VL-7B-FP4 (TRT-LLM)',
+    apiUrl: 'http://192.168.1.89:8201/v1/chat/completions',
+    modelId: 'nvidia/Qwen2.5-VL-7B-Instruct-FP4',
+    maxTokens: 2048,
+  },
+  'qwen3-30b-fp4': {
+    name: 'Qwen3-30B-A3B-FP4 (TRT-LLM)',
+    apiUrl: 'http://192.168.1.89:8202/v1/chat/completions',
+    modelId: 'nvidia/Qwen3-30B-A3B-FP4',
+    maxTokens: 2048,
+  },
+  'qwen3-32b-fp4': {
+    name: 'Qwen3-32B-FP4 (TRT-LLM)',
+    apiUrl: 'http://192.168.1.89:8203/v1/chat/completions',
+    modelId: 'nvidia/Qwen3-32B-FP4',
+    maxTokens: 2048,
+  },
+  'qwen3-coder-30b-awq': {
+    name: 'Qwen3-Coder-30B-AWQ (vLLM)',
+    apiUrl: 'http://192.168.1.89:8104/v1/chat/completions',
+    modelId: 'cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit',
+    maxTokens: 2048,
+  },
 };
 
 export class ChatAPI {
