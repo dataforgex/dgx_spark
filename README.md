@@ -46,8 +46,9 @@ dgx_spark/
 ├── vllm-qwen3-coder-30b/       # Text/code model
 ├── vllm-qwen3-coder-30b-awq/   # AWQ quantized (fastest)
 ├── vllm-qwen2-vl-7b/           # Vision model
-├── vllm-ministral3-14b/        # Mistral model
-├── searxng/                    # Local search engine
+├── vllm-mistral3-14b/          # Mistral model
+├── ollama-qwen3-vl-32b/        # Ollama vision model
+├── searxng-docker/             # Local search engine
 ├── benchmarks/                 # Performance benchmarks
 └── docs/                       # Documentation
 ```
@@ -75,7 +76,7 @@ Assistant: [searches web] Based on current data...
 ```
 
 Requires:
-1. SearXNG running: `cd searxng && docker compose up -d`
+1. SearXNG running: `cd searxng-docker && docker compose up -d`
 2. Model with tool calling (e.g., qwen3-coder-30b-awq)
 3. Search toggle enabled in chat
 
