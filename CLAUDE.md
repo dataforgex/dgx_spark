@@ -43,10 +43,33 @@ Output: `~/claude-archive/`
 
 ## Development Machines
 
-| Machine | IP | Role |
-|---------|-----|------|
-| spark-1 | 192.168.1.89 | Primary dev |
-| spark-2 | 192.168.1.49 | Secondary |
+| Machine | IP (Ethernet) | IP (200GbE) | Role |
+|---------|---------------|-------------|------|
+| spark-1 | 192.168.1.89 | 192.168.100.10 | Primary dev, K8s control-plane |
+| spark-2 | 192.168.1.49 | 192.168.100.11 | Secondary, K8s worker |
+
+## 200GbE Inter-Node Network
+
+Two DGX Sparks connected via QSFP 200GbE for high-speed GPU communication.
+
+**Interfaces:** `enp1s0f1np1` on both nodes
+**Bandwidth:** ~104 Gbits/sec (tested with iperf3)
+**Config:** `/etc/netplan/40-cx7.yaml` (persistent)
+
+```bash
+# Test connectivity
+ping 192.168.100.11  # from spark-1
+ping 192.168.100.10  # from spark-2
+
+# Bandwidth test
+ssh 192.168.100.11 "iperf3 -s -B 192.168.100.11 -1" &
+iperf3 -c 192.168.100.11 -t 10 -P 4
+```
+
+**Use cases:**
+- Multi-node vLLM for 120B+ models (tensor parallelism)
+- Distributed training
+- K8s pod-to-pod high-speed communication (with hostNetwork or Multus)
 
 ## Key Directories
 
