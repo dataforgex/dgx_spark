@@ -3,7 +3,7 @@
 # vLLM Server - Qwen3-Coder-30B AWQ
 # Optimized for DGX Spark (GB10 Blackwell)
 #
-# Settings: 32K context, 8 concurrent, ~34 GB memory
+# Settings: 64K context, 8 concurrent, ~45 GB memory
 # Performance: 0.069s TTFT, 52 TPS
 
 # ==============================================================================
@@ -21,13 +21,13 @@ HF_CACHE_DIR="${HOME}/.cache/huggingface"
 mkdir -p "${HF_CACHE_DIR}"
 
 # Context and concurrency - optimized for DGX Spark
-MAX_MODEL_LEN=32768              # 32K context
+MAX_MODEL_LEN=65536              # 64K context
 MAX_NUM_SEQS=8                   # 8 concurrent sequences
 
-# GPU memory utilization - sized for 8 concurrent 32K sequences
+# GPU memory utilization - sized for 8 concurrent 64K sequences
 # Note: 0.9 would pre-allocate 90% regardless of need
-# With 8 seqs @ 32K, we need ~25-30GB total (model + KV cache)
-GPU_MEMORY_UTILIZATION=0.3
+# With 8 seqs @ 64K, we need ~40-45GB total (model + KV cache)
+GPU_MEMORY_UTILIZATION=0.4
 
 # FP8 KV Cache - NOT YET SUPPORTED on GB10/Blackwell
 # vLLM V1 engine doesn't support fp8 kv cache, V0 uses incompatible Hopper kernels
@@ -122,7 +122,7 @@ echo "Port: ${PORT}"
 echo "Context: ${MAX_MODEL_LEN} tokens"
 echo "Concurrent: ${MAX_NUM_SEQS} sequences"
 echo "GPU Memory: ${GPU_MEMORY_UTILIZATION}"
-echo "Expected RAM: ~34 GB"
+echo "Expected RAM: ~45 GB"
 echo "=================================================="
 echo ""
 
