@@ -28,6 +28,15 @@ export interface SandboxExecuteResult {
   exec_id: string;
 }
 
+// Result from executing a single tool
+interface ToolExecutionResult {
+  toolCallId: string;
+  toolName: string;
+  content: string;
+  searchResults?: SearchResult[];
+  sandboxOutput?: string;
+}
+
 // Use 127.0.0.1 for localhost to avoid IPv6 resolution issues
 const getApiHost = () => {
   const hostname = window.location.hostname;
@@ -128,6 +137,115 @@ export class ChatAPI {
     if (result.length <= maxChars) return result;
     const truncated = result.slice(0, maxChars);
     return truncated + `\n...[truncated, ${result.length - maxChars} chars omitted]`;
+  }
+
+  // Summarize old messages to compress context
+  private async summarizeMessages(messages: any[]): Promise<string> {
+    const modelUrl = `http://${getApiHost()}:${this.port}/v1/chat/completions`;
+
+    // Build a summary prompt
+    const conversationText = messages
+      .filter(m => m.role !== 'system')
+      .map(m => {
+        if (m.role === 'tool') {
+          // Compress tool results heavily
+          const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+          return `[Tool ${m.name}]: ${content.slice(0, 200)}...`;
+        }
+        if (m.tool_calls) {
+          const tools = m.tool_calls.map((tc: any) => tc.function.name).join(', ');
+          return `Assistant: [Called tools: ${tools}] ${m.content || ''}`;
+        }
+        return `${m.role}: ${m.content}`;
+      })
+      .join('\n');
+
+    const summaryPrompt = [
+      {
+        role: 'system',
+        content: 'You are a conversation summarizer. Create a concise summary of the conversation that preserves: 1) Key topics discussed, 2) Important facts/data mentioned (prices, calculations, etc), 3) Decisions made, 4) Current task state. Be brief but comprehensive. Output only the summary, no preamble.'
+      },
+      {
+        role: 'user',
+        content: `Summarize this conversation:\n\n${conversationText}`
+      }
+    ];
+
+    try {
+      const response = await fetch(modelUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: this.model,
+          messages: summaryPrompt,
+          max_tokens: 500,  // Keep summary short
+          temperature: 0.3,  // More deterministic
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        console.warn('Summarization failed, using truncation fallback');
+        return this.fallbackSummary(messages);
+      }
+
+      const result = await response.json() as any;
+      const summary = result.choices?.[0]?.message?.content || this.fallbackSummary(messages);
+      console.log('📝 Context summarized:', summary.slice(0, 100) + '...');
+      return summary;
+    } catch (error) {
+      console.warn('Summarization error:', error);
+      return this.fallbackSummary(messages);
+    }
+  }
+
+  // Fallback: simple truncation-based summary
+  private fallbackSummary(messages: any[]): string {
+    const userMessages = messages.filter(m => m.role === 'user');
+    const lastAssistant = messages.filter(m => m.role === 'assistant' && m.content).slice(-1)[0];
+
+    return `Previous topics: ${userMessages.map(m => m.content.slice(0, 50)).join('; ')}. ` +
+           `Last response: ${lastAssistant?.content?.slice(0, 200) || 'N/A'}`;
+  }
+
+  // Compress context if it's getting too large
+  async compressContextIfNeeded(messages: any[]): Promise<any[]> {
+    const estimatedTokens = this.estimateTokens(messages);
+    const threshold = this.maxContextLength * 0.7;  // Compress at 70% capacity
+
+    if (estimatedTokens < threshold) {
+      return messages;  // No compression needed
+    }
+
+    console.log(`🗜️ Context compression triggered: ~${estimatedTokens} tokens (threshold: ${Math.round(threshold)})`);
+
+    // Keep system message and last N messages
+    const KEEP_RECENT = 6;  // Keep last 6 messages (3 turns)
+    const systemMsg = messages.find(m => m.role === 'system');
+    const recentMessages = messages.slice(-KEEP_RECENT);
+    const oldMessages = messages.slice(1, -KEEP_RECENT);  // Exclude system and recent
+
+    if (oldMessages.length === 0) {
+      return messages;  // Nothing to summarize
+    }
+
+    // Summarize old messages
+    const summary = await this.summarizeMessages(oldMessages);
+
+    // Build compressed context
+    const compressed = [
+      systemMsg,
+      {
+        role: 'assistant',
+        content: `[Previous conversation summary]\n${summary}\n[End of summary - continuing conversation]`
+      },
+      ...recentMessages
+    ].filter(Boolean);
+
+    const newTokens = this.estimateTokens(compressed);
+    console.log(`🗜️ Context compressed: ${estimatedTokens} → ${newTokens} tokens`);
+
+    return compressed;
   }
 
   setModel(modelKey: string) {
@@ -233,6 +351,61 @@ export class ChatAPI {
     return this.sandboxTools.some(t => t.function.name === toolName);
   }
 
+  // Execute a single tool by name and return structured result
+  private async executeToolByName(
+    toolCallId: string,
+    toolName: string,
+    args: Record<string, any>
+  ): Promise<ToolExecutionResult> {
+    if (toolName === 'web_search') {
+      const searchResults = await this.performWebSearch(args.query);
+      console.log(`🔍 Web Search [${toolCallId}]:`, args.query);
+      return {
+        toolCallId,
+        toolName,
+        content: JSON.stringify({
+          results: searchResults.map(r => ({
+            title: r.title,
+            url: r.url,
+            snippet: r.snippet
+          }))
+        }),
+        searchResults
+      };
+    } else if (this.isSandboxTool(toolName)) {
+      console.log(`🔧 Sandbox [${toolCallId}]: ${toolName}`, args);
+      const sandboxResult = await this.executeSandboxTool(toolName, args);
+
+      if (sandboxResult.success) {
+        return {
+          toolCallId,
+          toolName,
+          content: JSON.stringify({
+            success: true,
+            output: sandboxResult.output,
+            execution_time: sandboxResult.execution_time
+          }),
+          sandboxOutput: sandboxResult.output
+        };
+      } else {
+        return {
+          toolCallId,
+          toolName,
+          content: JSON.stringify({
+            success: false,
+            error: sandboxResult.error
+          })
+        };
+      }
+    } else {
+      return {
+        toolCallId,
+        toolName,
+        content: JSON.stringify({ error: `Unknown tool: ${toolName}` })
+      };
+    }
+  }
+
   getSandboxTools(): SandboxTool[] {
     return this.sandboxTools;
   }
@@ -245,13 +418,21 @@ export class ChatAPI {
     messages: ChatRequest['messages'],
     enableSearch: boolean = false,
     enableSandbox: boolean = false
-  ): Promise<{ content: string; reasoning_content?: string; search_results?: SearchResult[]; sandbox_output?: string }> {
-    let searchResults: SearchResult[] | undefined;
-    let sandboxOutput: string | undefined;
+  ): Promise<{ content: string; reasoning_content?: string; search_results?: SearchResult[]; sandbox_outputs?: string[]; context_compressed?: boolean }> {
+    let allSearchResults: SearchResult[] = [];
+    let allSandboxOutputs: string[] = [];
+    let contextCompressed = false;
+
+    // Compress context if needed before processing
     let conversationMessages = [...messages];
+    const compressedMessages = await this.compressContextIfNeeded(conversationMessages);
+    if (compressedMessages.length !== conversationMessages.length) {
+      conversationMessages = compressedMessages;
+      contextCompressed = true;
+    }
 
     // Transform messages to handle images
-    const apiMessages = conversationMessages.map(msg => {
+    let apiMessages = conversationMessages.map(msg => {
       if (msg.role === 'user' && msg.image) {
         return {
           role: 'user',
@@ -318,72 +499,52 @@ export class ChatAPI {
     while (iteration < MAX_TOOL_ITERATIONS) {
       const choice = result.choices[0];
 
-      // Check if model wants to call a function
+      // Check if model wants to call any functions
       if (!choice.message.tool_calls || choice.message.tool_calls.length === 0) {
         break; // No more tool calls, exit loop
       }
 
       iteration++;
-      console.log(`🔄 Tool call iteration ${iteration}`);
+      const toolCalls = choice.message.tool_calls;
+      console.log(`🔄 Tool call iteration ${iteration}: ${toolCalls.length} tool(s) requested`);
 
-      const toolCall = choice.message.tool_calls[0];
-      const toolName = toolCall.function.name;
-      const args = JSON.parse(toolCall.function.arguments);
+      // Execute ALL tool calls in parallel
+      const toolResults = await Promise.all(
+        toolCalls.map(async (toolCall: any) => {
+          const toolName = toolCall.function.name;
+          const args = JSON.parse(toolCall.function.arguments);
+          return this.executeToolByName(toolCall.id, toolName, args);
+        })
+      );
 
-      let toolResultContent: string;
-
-      if (toolName === 'web_search') {
-        // Handle web search
-        searchResults = await this.performWebSearch(args.query);
-        console.log('🔍 Web Search Results:', searchResults);
-        toolResultContent = JSON.stringify({
-          results: searchResults.map(r => ({
-            title: r.title,
-            url: r.url,
-            snippet: r.snippet
-          }))
-        });
-      } else if (this.isSandboxTool(toolName)) {
-        // Handle sandbox tool
-        console.log(`🔧 Executing sandbox tool: ${toolName}`, args);
-        const sandboxResult = await this.executeSandboxTool(toolName, args);
-        console.log('📦 Sandbox Result:', sandboxResult);
-
-        if (sandboxResult.success) {
-          sandboxOutput = sandboxResult.output;
-          toolResultContent = JSON.stringify({
-            success: true,
-            output: sandboxResult.output,
-            execution_time: sandboxResult.execution_time
-          });
-        } else {
-          toolResultContent = JSON.stringify({
-            success: false,
-            error: sandboxResult.error
-          });
+      // Aggregate results from all tools
+      for (const result of toolResults) {
+        if (result.searchResults) {
+          allSearchResults.push(...result.searchResults);
         }
-      } else {
-        // Unknown tool
-        toolResultContent = JSON.stringify({ error: `Unknown tool: ${toolName}` });
+        if (result.sandboxOutput) {
+          allSandboxOutputs.push(result.sandboxOutput);
+        }
       }
 
-      // Add assistant's function call to conversation
+      // Add assistant's message with ALL tool calls
       conversationMessages.push({
         role: 'assistant',
         content: choice.message.content || '',
-        tool_calls: choice.message.tool_calls
+        tool_calls: toolCalls
       } as any);
 
-      // Add function result (truncated to prevent context overflow)
-      const truncatedResult = this.truncateToolResult(toolResultContent);
-      conversationMessages.push({
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        name: toolName,
-        content: truncatedResult
-      } as any);
-
-      console.log('🔧 Tool Result Content:', truncatedResult.length > 500 ? truncatedResult.slice(0, 500) + '...' : truncatedResult);
+      // Add each tool result as separate message
+      for (const result of toolResults) {
+        const truncatedResult = this.truncateToolResult(result.content);
+        conversationMessages.push({
+          role: 'tool',
+          tool_call_id: result.toolCallId,
+          name: result.toolName,
+          content: truncatedResult
+        } as any);
+        console.log(`📦 [${result.toolName}]:`, truncatedResult.length > 200 ? truncatedResult.slice(0, 200) + '...' : truncatedResult);
+      }
 
       // Make next request with function results - include tools for additional tool calls
       const nextPayload: any = {
@@ -429,8 +590,9 @@ export class ChatAPI {
     return {
       content: finalMessage.content,
       reasoning_content: finalMessage.reasoning_content,
-      search_results: searchResults,
-      sandbox_output: sandboxOutput
+      search_results: allSearchResults.length > 0 ? allSearchResults : undefined,
+      sandbox_outputs: allSandboxOutputs.length > 0 ? allSandboxOutputs : undefined,
+      context_compressed: contextCompressed || undefined
     };
   }
 
