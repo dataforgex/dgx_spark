@@ -38,6 +38,7 @@ KV_CACHE_DTYPE="auto"
 ENABLE_PREFIX_CACHING=true
 ENABLE_CHUNKED_PREFILL=true
 DTYPE="auto"
+SWAP_SPACE=16                    # 16GB swap for context overflow
 
 # Qwen-specific
 ENABLE_AUTO_TOOL_CHOICE=true
@@ -94,7 +95,8 @@ DOCKER_CMD="docker run -d \
   --max-num-seqs ${MAX_NUM_SEQS} \
   --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION} \
   --kv-cache-dtype ${KV_CACHE_DTYPE} \
-  --dtype ${DTYPE}"
+  --dtype ${DTYPE} \
+  --swap-space ${SWAP_SPACE}"
 
 # Add optional features
 if [ "$ENABLE_PREFIX_CACHING" = true ]; then
@@ -122,6 +124,7 @@ echo "Port: ${PORT}"
 echo "Context: ${MAX_MODEL_LEN} tokens"
 echo "Concurrent: ${MAX_NUM_SEQS} sequences"
 echo "GPU Memory: ${GPU_MEMORY_UTILIZATION}"
+echo "Swap Space: ${SWAP_SPACE} GB"
 echo "Expected RAM: ~45 GB"
 echo "=================================================="
 echo ""
