@@ -7,7 +7,19 @@ import { ChatInput } from './ChatInput';
 import { ChatSidebar } from './ChatSidebar';
 import './Chat.css';
 
-const SYSTEM_MESSAGE = 'You are a helpful AI assistant. You have access to a web search tool. You MUST use the web_search tool when the user asks for current information, news, weather, or any data that might have changed recently. Do not say you cannot access real-time information without trying to search first.';
+const getSystemMessage = (hasSearch: boolean, hasSandbox: boolean) => {
+  let msg = 'You are a helpful AI assistant.';
+  if (hasSearch) {
+    msg += ' You have access to a web_search tool for current information, news, weather, or any data that might have changed recently.';
+  }
+  if (hasSandbox) {
+    msg += ' You have access to sandbox tools for executing code (Python, bash, Node.js), analyzing files, and storing data. Use code_execution when calculations, data processing, or programming tasks are requested. Use data_storage to save and retrieve data between interactions.';
+  }
+  if (hasSearch || hasSandbox) {
+    msg += ' Always prefer using your tools when appropriate rather than saying you cannot do something.';
+  }
+  return msg;
+};
 
 // Use 127.0.0.1 for localhost to avoid IPv6 resolution issues
 const getModelManagerHost = () => {
@@ -37,6 +49,11 @@ export function Chat() {
     const saved = localStorage.getItem('enable_search');
     return saved === 'true';
   });
+  const [enableSandbox, setEnableSandbox] = useState<boolean>(() => {
+    const saved = localStorage.getItem('enable_sandbox');
+    return saved === 'true';
+  });
+  const [sandboxAvailable, setSandboxAvailable] = useState(false);
 
   // If no chatId, or invalid chatId, we might need to redirect or create new
   const currentChat = chatId ? conversations[chatId] : null;
@@ -56,6 +73,10 @@ export function Chat() {
   useEffect(() => {
     apiRef.current = new ChatAPI(selectedModel);
     apiRef.current.fetchModelInfo().then(setModelInfo);
+    // Also fetch sandbox tools
+    apiRef.current.fetchSandboxTools().then(tools => {
+      setSandboxAvailable(tools.length > 0);
+    });
   }, [selectedModel]);
 
   // Fetch running models from model-manager API
@@ -100,6 +121,10 @@ export function Chat() {
   }, [enableSearch]);
 
   useEffect(() => {
+    localStorage.setItem('enable_sandbox', enableSandbox.toString());
+  }, [enableSandbox]);
+
+  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentChat?.messages, chatId]);
 
@@ -120,6 +145,8 @@ export function Chat() {
       image: image
     };
 
+    const systemMessage = getSystemMessage(enableSearch, enableSandbox && sandboxAvailable);
+
     if (!activeChatId || !conversations[activeChatId]) {
       // Create new conversation
       const newId = Date.now().toString();
@@ -127,7 +154,7 @@ export function Chat() {
         id: newId,
         title: userInput.slice(0, 30) + (userInput.length > 30 ? '...' : ''),
         messages: [
-          { role: 'system', content: SYSTEM_MESSAGE },
+          { role: 'system', content: systemMessage },
           userMessage
         ],
         timestamp: Date.now()
@@ -155,11 +182,11 @@ export function Chat() {
     try {
       // Ensure we use the latest system message
       const messagesToSend = updatedMessages.map(msg =>
-        msg.role === 'system' ? { ...msg, content: SYSTEM_MESSAGE } : msg
+        msg.role === 'system' ? { ...msg, content: systemMessage } : msg
       );
 
       // Start API call - this continues even if component unmounts
-      const responsePromise = apiRef.current.sendMessage(messagesToSend, enableSearch);
+      const responsePromise = apiRef.current.sendMessage(messagesToSend, enableSearch, enableSandbox && sandboxAvailable);
 
       responsePromise.then(response => {
         const assistantMessage: Message = {
@@ -245,7 +272,8 @@ export function Chat() {
     }
   };
 
-  const messages = currentChat ? currentChat.messages : [{ role: 'system' as const, content: SYSTEM_MESSAGE }];
+  const defaultSystemMessage = getSystemMessage(enableSearch, enableSandbox && sandboxAvailable);
+  const messages = currentChat ? currentChat.messages : [{ role: 'system' as const, content: defaultSystemMessage }];
 
   // Filter out system message for display if desired, or keep it.
   // Current implementation displays all, but ChatMessage might hide system.
@@ -298,7 +326,21 @@ export function Chat() {
                 />
                 <span className="toggle-slider"></span>
               </label>
-              <span className="toggle-label">🔍 Web Search</span>
+              <span className="toggle-label">🔍 Search</span>
+            </div>
+            <div className="search-toggle">
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={enableSandbox}
+                  onChange={(e) => setEnableSandbox(e.target.checked)}
+                  disabled={!sandboxAvailable}
+                />
+                <span className="toggle-slider"></span>
+              </label>
+              <span className="toggle-label" title={sandboxAvailable ? 'Code execution sandbox' : 'Sandbox API not available'}>
+                {sandboxAvailable ? '🔧 Sandbox' : '🔧 Sandbox (N/A)'}
+              </span>
             </div>
             {modelInfo && <div>Ctx: {modelInfo.toLocaleString()}</div>}
           </div>

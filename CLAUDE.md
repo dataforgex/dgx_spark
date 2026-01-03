@@ -24,6 +24,7 @@ The SSH config (`~/.ssh/config`) maps `github-dataforgex` to the correct SSH key
 | Web GUI | 5173 | Docker container `dgx-spark-web-gui` (auto-starts) |
 | Metrics API | 5174 | Same container as Web GUI |
 | Model Manager | 5175 | `./model-manager/serve.sh` |
+| Tool Sandbox | 5176 | `./tool-call-sandbox/serve.sh` |
 | SearXNG Search | 8080 | `cd searxng-docker && ./start.sh` |
 
 All services have `restart: unless-stopped` policy.
@@ -53,6 +54,7 @@ Output: `~/claude-archive/`
 |------|---------|
 | `model-manager/` | Web API for starting/stopping models |
 | `web-gui/` | React dashboard for GPU/container monitoring |
+| `tool-call-sandbox/` | Sandboxed LLM tool execution (skills-like pattern) |
 | `searxng-docker/` | Private search engine (no tracking) |
 | `vllm-*/` | vLLM model deployment configs |
 | `claude-transcripts/` | Session-to-HTML converter |

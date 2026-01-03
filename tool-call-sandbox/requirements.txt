@@ -1,0 +1,14 @@
+# Tool Call Sandbox API Dependencies
+
+# Web framework
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# Docker SDK
+docker>=6.1.0
+
+# Data parsing (for tool loader)
+pyyaml>=6.0
+
+# HTTP client (for testing)
+httpx>=0.25.0

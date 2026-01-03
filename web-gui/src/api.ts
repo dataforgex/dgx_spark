@@ -7,11 +7,34 @@ export interface ModelConfig {
   maxTokens: number;
 }
 
+export interface SandboxTool {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: {
+      type: "object";
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+  };
+}
+
+export interface SandboxExecuteResult {
+  success: boolean;
+  output: string;
+  error: string;
+  execution_time: number;
+  exec_id: string;
+}
+
 // Use 127.0.0.1 for localhost to avoid IPv6 resolution issues
 const getApiHost = () => {
   const hostname = window.location.hostname;
   return hostname === 'localhost' ? '127.0.0.1' : hostname;
 };
+
+const SANDBOX_API_PORT = 5176;
 
 const SEARCH_TOOL = {
   type: "function",
@@ -69,6 +92,8 @@ export class ChatAPI {
   private model: string;
   private maxTokens: number;
   private temperature: number;
+  private sandboxTools: SandboxTool[] = [];
+  private sessionId: string;
 
   constructor(
     modelKey: string = 'qwen3-coder-30b',
@@ -79,6 +104,7 @@ export class ChatAPI {
     this.model = config.modelId;
     this.maxTokens = config.maxTokens;
     this.temperature = temperature;
+    this.sessionId = crypto.randomUUID();
   }
 
   setModel(modelKey: string) {
@@ -128,11 +154,72 @@ export class ChatAPI {
     return data.results || [];
   }
 
+  async fetchSandboxTools(): Promise<SandboxTool[]> {
+    try {
+      const sandboxUrl = `http://${getApiHost()}:${SANDBOX_API_PORT}/api/tools-openai`;
+      const response = await fetch(sandboxUrl, {
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (!response.ok) {
+        console.warn('Sandbox API not available');
+        return [];
+      }
+
+      this.sandboxTools = await response.json();
+      console.log('📦 Loaded sandbox tools:', this.sandboxTools.map(t => t.function.name));
+      return this.sandboxTools;
+    } catch (error) {
+      console.warn('Failed to fetch sandbox tools:', error);
+      return [];
+    }
+  }
+
+  private async executeSandboxTool(toolName: string, args: Record<string, unknown>): Promise<SandboxExecuteResult> {
+    const sandboxUrl = `http://${getApiHost()}:${SANDBOX_API_PORT}/api/execute/${toolName}`;
+    const response = await fetch(sandboxUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-Id': this.sessionId,
+      },
+      body: JSON.stringify({ args, session_id: this.sessionId }),
+      signal: AbortSignal.timeout(60000),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return {
+        success: false,
+        output: '',
+        error: `Sandbox API error: ${response.status} - ${errorText}`,
+        execution_time: 0,
+        exec_id: '',
+      };
+    }
+
+    return await response.json();
+  }
+
+  private isSandboxTool(toolName: string): boolean {
+    return this.sandboxTools.some(t => t.function.name === toolName);
+  }
+
+  getSandboxTools(): SandboxTool[] {
+    return this.sandboxTools;
+  }
+
+  getSessionId(): string {
+    return this.sessionId;
+  }
+
   async sendMessage(
     messages: ChatRequest['messages'],
-    enableSearch: boolean = false
-  ): Promise<{ content: string; reasoning_content?: string; search_results?: SearchResult[] }> {
+    enableSearch: boolean = false,
+    enableSandbox: boolean = false
+  ): Promise<{ content: string; reasoning_content?: string; search_results?: SearchResult[]; sandbox_output?: string }> {
     let searchResults: SearchResult[] | undefined;
+    let sandboxOutput: string | undefined;
     let conversationMessages = [...messages];
 
     // Transform messages to handle images
@@ -151,7 +238,16 @@ export class ChatAPI {
       return rest;
     });
 
-    // Initial request with tools if search is enabled
+    // Build tools list
+    const tools: any[] = [];
+    if (enableSearch) {
+      tools.push(SEARCH_TOOL);
+    }
+    if (enableSandbox && this.sandboxTools.length > 0) {
+      tools.push(...this.sandboxTools);
+    }
+
+    // Initial request with tools if any are enabled
     const payload: any = {
       model: this.model,
       messages: apiMessages,
@@ -160,8 +256,8 @@ export class ChatAPI {
       repetition_penalty: 1.1,  // Prevent repetition loops (especially for TRT-LLM)
     };
 
-    if (enableSearch) {
-      payload.tools = [SEARCH_TOOL];
+    if (tools.length > 0) {
+      payload.tools = tools;
       payload.tool_choice = "auto";
     }
 
@@ -191,74 +287,95 @@ export class ChatAPI {
     const choice = result.choices[0];
     if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
       const toolCall = choice.message.tool_calls[0];
+      const toolName = toolCall.function.name;
+      const args = JSON.parse(toolCall.function.arguments);
 
-      if (toolCall.function.name === 'web_search') {
-        const args = JSON.parse(toolCall.function.arguments);
+      let toolResultContent: string;
 
-        // Perform the search
+      if (toolName === 'web_search') {
+        // Handle web search
         searchResults = await this.performWebSearch(args.query);
         console.log('🔍 Web Search Results:', searchResults);
-
-        // Add assistant's function call to conversation
-        conversationMessages.push({
-          role: 'assistant',
-          content: choice.message.content || '',
-          tool_calls: choice.message.tool_calls
-        } as any);
-
-        // Add function result
-        const toolResultContent = JSON.stringify({
+        toolResultContent = JSON.stringify({
           results: searchResults.map(r => ({
             title: r.title,
             url: r.url,
             snippet: r.snippet
           }))
         });
+      } else if (this.isSandboxTool(toolName)) {
+        // Handle sandbox tool
+        console.log(`🔧 Executing sandbox tool: ${toolName}`, args);
+        const sandboxResult = await this.executeSandboxTool(toolName, args);
+        console.log('📦 Sandbox Result:', sandboxResult);
 
-        conversationMessages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          name: toolCall.function.name,
-          content: toolResultContent
-        } as any);
-
-        console.log('🔧 Tool Result Content:', toolResultContent);
-        console.log('📝 Full conversation before second call:', JSON.stringify(conversationMessages, null, 2));
-
-        // Make second request with function results
-        const secondPayload = {
-          model: this.model,
-          messages: conversationMessages,
-          max_tokens: this.maxTokens,
-          temperature: this.temperature,
-          repetition_penalty: 1.1,
-        };
-
-        console.log('📤 Second API call payload:', JSON.stringify(secondPayload, null, 2));
-
-        response = await fetch(modelUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(secondPayload),
-          signal: AbortSignal.timeout(1800000),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`API error: ${response.status} - ${errorText}`);
+        if (sandboxResult.success) {
+          sandboxOutput = sandboxResult.output;
+          toolResultContent = JSON.stringify({
+            success: true,
+            output: sandboxResult.output,
+            execution_time: sandboxResult.execution_time
+          });
+        } else {
+          toolResultContent = JSON.stringify({
+            success: false,
+            error: sandboxResult.error
+          });
         }
-
-        result = await response.json() as any;
+      } else {
+        // Unknown tool
+        toolResultContent = JSON.stringify({ error: `Unknown tool: ${toolName}` });
       }
+
+      // Add assistant's function call to conversation
+      conversationMessages.push({
+        role: 'assistant',
+        content: choice.message.content || '',
+        tool_calls: choice.message.tool_calls
+      } as any);
+
+      // Add function result
+      conversationMessages.push({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        name: toolName,
+        content: toolResultContent
+      } as any);
+
+      console.log('🔧 Tool Result Content:', toolResultContent);
+
+      // Make second request with function results
+      const secondPayload = {
+        model: this.model,
+        messages: conversationMessages,
+        max_tokens: this.maxTokens,
+        temperature: this.temperature,
+        repetition_penalty: 1.1,
+      };
+
+      response = await fetch(modelUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(secondPayload),
+        signal: AbortSignal.timeout(1800000),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API error: ${response.status} - ${errorText}`);
+      }
+
+      result = await response.json() as any;
     }
 
     const finalMessage = result.choices[0].message;
     return {
       content: finalMessage.content,
       reasoning_content: finalMessage.reasoning_content,
-      search_results: searchResults
+      search_results: searchResults,
+      sandbox_output: sandboxOutput
     };
   }
 
