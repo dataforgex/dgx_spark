@@ -94,6 +94,7 @@ export class ChatAPI {
   private temperature: number;
   private sandboxTools: SandboxTool[] = [];
   private sessionId: string;
+  private maxContextLength: number = 32768; // Default, updated by fetchModelInfo
 
   constructor(
     modelKey: string = 'qwen3-coder-30b',
@@ -105,6 +106,28 @@ export class ChatAPI {
     this.maxTokens = config.maxTokens;
     this.temperature = temperature;
     this.sessionId = crypto.randomUUID();
+  }
+
+  // Estimate token count (rough approximation: ~4 chars per token)
+  private estimateTokens(messages: any[]): number {
+    const text = JSON.stringify(messages);
+    return Math.ceil(text.length / 3.5); // Slightly conservative estimate
+  }
+
+  // Calculate safe max_tokens based on estimated input tokens
+  private calculateMaxTokens(messages: any[]): number {
+    const estimatedInputTokens = this.estimateTokens(messages);
+    const availableTokens = this.maxContextLength - estimatedInputTokens - 100; // 100 token buffer
+    const safeMaxTokens = Math.max(256, Math.min(this.maxTokens, availableTokens));
+    console.log(`📊 Token estimate: ~${estimatedInputTokens} input, ${safeMaxTokens} max output`);
+    return safeMaxTokens;
+  }
+
+  // Truncate tool result to prevent context overflow
+  private truncateToolResult(result: string, maxChars: number = 8000): string {
+    if (result.length <= maxChars) return result;
+    const truncated = result.slice(0, maxChars);
+    return truncated + `\n...[truncated, ${result.length - maxChars} chars omitted]`;
   }
 
   setModel(modelKey: string) {
@@ -128,6 +151,11 @@ export class ChatAPI {
 
       const data = await response.json() as ModelInfo;
       const modelData = data.data.find(m => m.id === this.model);
+
+      if (modelData?.max_model_len) {
+        this.maxContextLength = modelData.max_model_len;
+        console.log(`📏 Model context length: ${this.maxContextLength}`);
+      }
 
       return modelData?.max_model_len || null;
     } catch {
@@ -251,7 +279,7 @@ export class ChatAPI {
     const payload: any = {
       model: this.model,
       messages: apiMessages,
-      max_tokens: this.maxTokens,
+      max_tokens: this.calculateMaxTokens(apiMessages),
       temperature: this.temperature,
       repetition_penalty: 1.1,  // Prevent repetition loops (especially for TRT-LLM)
     };
@@ -283,9 +311,21 @@ export class ChatAPI {
       throw new Error('No response from API');
     }
 
-    // Check if model wants to call a function
-    const choice = result.choices[0];
-    if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
+    // Handle tool calls in a loop (max 10 iterations to prevent infinite loops)
+    const MAX_TOOL_ITERATIONS = 10;
+    let iteration = 0;
+
+    while (iteration < MAX_TOOL_ITERATIONS) {
+      const choice = result.choices[0];
+
+      // Check if model wants to call a function
+      if (!choice.message.tool_calls || choice.message.tool_calls.length === 0) {
+        break; // No more tool calls, exit loop
+      }
+
+      iteration++;
+      console.log(`🔄 Tool call iteration ${iteration}`);
+
       const toolCall = choice.message.tool_calls[0];
       const toolName = toolCall.function.name;
       const args = JSON.parse(toolCall.function.arguments);
@@ -334,31 +374,38 @@ export class ChatAPI {
         tool_calls: choice.message.tool_calls
       } as any);
 
-      // Add function result
+      // Add function result (truncated to prevent context overflow)
+      const truncatedResult = this.truncateToolResult(toolResultContent);
       conversationMessages.push({
         role: 'tool',
         tool_call_id: toolCall.id,
         name: toolName,
-        content: toolResultContent
+        content: truncatedResult
       } as any);
 
-      console.log('🔧 Tool Result Content:', toolResultContent);
+      console.log('🔧 Tool Result Content:', truncatedResult.length > 500 ? truncatedResult.slice(0, 500) + '...' : truncatedResult);
 
-      // Make second request with function results
-      const secondPayload = {
+      // Make next request with function results - include tools for additional tool calls
+      const nextPayload: any = {
         model: this.model,
         messages: conversationMessages,
-        max_tokens: this.maxTokens,
+        max_tokens: this.calculateMaxTokens(conversationMessages),
         temperature: this.temperature,
         repetition_penalty: 1.1,
       };
+
+      // Include tools so model can make additional tool calls if needed
+      if (tools.length > 0) {
+        nextPayload.tools = tools;
+        nextPayload.tool_choice = "auto";
+      }
 
       response = await fetch(modelUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(secondPayload),
+        body: JSON.stringify(nextPayload),
         signal: AbortSignal.timeout(1800000),
       });
 
@@ -368,6 +415,14 @@ export class ChatAPI {
       }
 
       result = await response.json() as any;
+
+      if (!result.choices || result.choices.length === 0) {
+        throw new Error('No response from API');
+      }
+    }
+
+    if (iteration >= MAX_TOOL_ITERATIONS) {
+      console.warn('⚠️ Reached maximum tool call iterations');
     }
 
     const finalMessage = result.choices[0].message;
