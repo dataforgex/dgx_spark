@@ -28,16 +28,17 @@ app.add_middleware(
 # Path to models.json (check /app first for Docker, then parent directory)
 MODELS_CONFIG_PATH = Path("/app/models.json") if Path("/app/models.json").exists() else Path(__file__).parent.parent / "models.json"
 
+# Base directory for model script directories (for engine: "script" models)
+# In Docker: set via MODELS_BASE_DIR env var (mounted at /app/models)
+# Local: use parent directory of this script
+MODELS_BASE_DIR = Path(os.environ.get("MODELS_BASE_DIR", str(Path(__file__).parent.parent)))
+
 # When running in Docker, we need to use host paths for volume mounts
 # The container mounts host's ~/.cache/huggingface to /root/.cache/huggingface
 # So we write configs to /root/.cache/huggingface but mount using host path
 HOST_HOME = os.environ.get("HOST_HOME", str(Path.home()))
 HF_CACHE_DIR = Path("/root/.cache/huggingface") if Path("/app/models.json").exists() else Path.home() / ".cache" / "huggingface"
 HOST_HF_CACHE_DIR = f"{HOST_HOME}/.cache/huggingface"
-TRTLLM_CONFIG_DIR = HF_CACHE_DIR / "trtllm-configs"
-
-# Nginx CORS proxy config path
-NGINX_CORS_PROXY_DIR = Path(__file__).parent.parent / "nginx-cors-proxy"
 
 # Cache for model status (TTL in seconds)
 CACHE_TTL = 3.0
@@ -87,39 +88,6 @@ async def async_run_command(cmd: list[str], timeout: float = 10.0) -> tuple[int,
         return -1, "", str(e)
 
 
-async def ensure_nginx_cors_proxy() -> bool:
-    """Ensure nginx-cors-proxy is running for TRT-LLM models. Returns True if started/running."""
-    returncode, stdout, _ = await async_run_command(
-        ["docker", "ps", "-q", "-f", "name=^nginx-cors-proxy$"]
-    )
-    if stdout.strip():
-        return True  # Already running
-
-    # Check if container exists but stopped
-    returncode, stdout, _ = await async_run_command(
-        ["docker", "ps", "-aq", "-f", "name=^nginx-cors-proxy$"]
-    )
-    if stdout.strip():
-        # Remove stopped container
-        await async_run_command(["docker", "rm", "nginx-cors-proxy"])
-
-    # Start nginx with CORS config
-    nginx_conf = NGINX_CORS_PROXY_DIR / "nginx.conf"
-    if not nginx_conf.exists():
-        return False
-
-    cmd = [
-        "docker", "run", "-d",
-        "--name", "nginx-cors-proxy",
-        "--network", "host",
-        "-v", f"{nginx_conf}:/etc/nginx/nginx.conf:ro",
-        "--restart", "unless-stopped",
-        "nginx:alpine"
-    ]
-    returncode, _, _ = await async_run_command(cmd, timeout=30.0)
-    return returncode == 0
-
-
 async def get_container_status(container_name: str) -> str:
     """Check if a Docker container is running (async)."""
     try:
@@ -158,6 +126,26 @@ async def get_container_memory(container_name: str) -> Optional[int]:
         return None
     except Exception:
         return None
+
+
+async def check_port_in_use(port: int) -> bool:
+    """Check if a port is in use (for script-based models)."""
+    try:
+        returncode, stdout, _ = await async_run_command(
+            ["ss", "-tlnp", f"sport = :{port}"],
+            timeout=5.0
+        )
+        # ss returns lines with LISTEN if port is in use
+        return "LISTEN" in stdout
+    except Exception:
+        return False
+
+
+async def get_script_model_status(port: int) -> str:
+    """Get status of a script-based model by checking its port."""
+    if await check_port_in_use(port):
+        return "running"
+    return "stopped"
 
 
 async def get_all_container_statuses() -> dict[str, str]:
@@ -213,53 +201,6 @@ def build_vllm_command(model_id: str, model_config: dict) -> list:
     return cmd
 
 
-def build_trtllm_command(model_id: str, model_config: dict) -> list:
-    """Build docker run command for TensorRT-LLM models."""
-    settings = model_config.get("settings", {})
-    port = model_config["port"]
-    container_name = model_config["container_name"]
-    image = model_config["image"]
-    model = model_config["model_id"]
-
-    # Create config file
-    TRTLLM_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    config_file = TRTLLM_CONFIG_DIR / f"{model_id}-config.yml"
-
-    config_content = f"""print_iter_log: false
-kv_cache_config:
-  dtype: auto
-  free_gpu_memory_fraction: {settings.get('free_gpu_memory_fraction', 0.3)}
-cuda_graph_config:
-  enable_padding: true
-"""
-    config_file.write_text(config_content)
-
-    hf_token = os.environ.get("HF_TOKEN", "")
-
-    cmd = [
-        "docker", "run", "-d",
-        "--name", container_name,
-        "--gpus", "all",
-        "--ipc=host",
-        "--network", "host",
-        "--ulimit", "memlock=-1",
-        "--ulimit", "stack=67108864",
-        "-e", f"HF_TOKEN={hf_token}",
-        "-v", f"{HOST_HF_CACHE_DIR}:/root/.cache/huggingface",
-        "--restart", "unless-stopped",
-        image,
-        "bash", "-c",
-        f"hf download {model} && trtllm-serve {model} "
-        f"--max_batch_size {settings.get('max_batch_size', 8)} "
-        f"--max_seq_len {settings.get('max_seq_len', 32768)} "
-        f"--trust_remote_code "
-        f"--port {port} "
-        f"--extra_llm_api_options /root/.cache/huggingface/trtllm-configs/{model_id}-config.yml"
-    ]
-
-    return cmd
-
-
 def build_ollama_command(model_id: str, model_config: dict) -> list:
     """Build docker run command for Ollama models."""
     port = model_config["port"]
@@ -281,6 +222,43 @@ def build_ollama_command(model_id: str, model_config: dict) -> list:
     ]
 
     return cmd, model  # Return model to pull after container starts
+
+
+async def run_model_script(model_config: dict, script_name: str) -> tuple[int, str, str]:
+    """Run a model's serve.sh or stop.sh script.
+
+    This is a long-term solution for models with custom configurations.
+    Each model directory contains its own serve.sh/stop.sh scripts.
+    """
+    script_dir = model_config.get("script_dir")
+    if not script_dir:
+        return -1, "", "No script_dir specified in model config"
+
+    script_path = MODELS_BASE_DIR / script_dir / script_name
+    if not script_path.exists():
+        return -1, "", f"Script not found: {script_path}"
+
+    # Run the script from its directory
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "bash", str(script_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(script_path.parent)
+        )
+        # Don't wait for completion - serve.sh runs docker in detached mode
+        # Give it a moment to start the container
+        await asyncio.sleep(2)
+
+        # Check if process is still running (script should exit quickly after docker run -d)
+        if proc.returncode is None:
+            # Script still running, that's fine for serve.sh with log following
+            return 0, "Container starting", ""
+
+        stdout, stderr = await proc.communicate()
+        return proc.returncode, stdout.decode(), stderr.decode()
+    except Exception as e:
+        return -1, "", str(e)
 
 
 @app.get("/api/models")
@@ -309,11 +287,18 @@ async def list_models() -> list[ModelStatus]:
 
         models = []
         running_model_containers = []
+        script_models_to_check = []
 
         for model_id, model_config in config["models"].items():
-            container_name = model_config["container_name"]
+            container_name = model_config.get("container_name", model_id)
+            engine = model_config["engine"]
 
-            # Determine status from batch results
+            # Script-based models check port instead of container
+            if engine == "script":
+                script_models_to_check.append((model_id, model_config))
+                continue
+
+            # Determine status from batch results (Docker-based models)
             if container_name in running_containers:
                 status = "running"
                 running_model_containers.append(container_name)
@@ -325,11 +310,25 @@ async def list_models() -> list[ModelStatus]:
             models.append(ModelStatus(
                 id=model_id,
                 name=model_config["name"],
-                engine=model_config["engine"],
+                engine=engine,
                 port=model_config["port"],
                 status=status,
                 container_name=container_name,
                 memory_mb=None  # Memory fetched separately to avoid slow docker stats
+            ))
+
+        # Check script-based models by port
+        for model_id, model_config in script_models_to_check:
+            port = model_config["port"]
+            status = await get_script_model_status(port)
+            models.append(ModelStatus(
+                id=model_id,
+                name=model_config["name"],
+                engine="script",
+                port=port,
+                status=status,
+                container_name=model_config.get("script_dir", model_id),
+                memory_mb=None
             ))
 
         # Fetch memory for running containers in parallel (if any)
@@ -390,9 +389,32 @@ async def start_model(model_id: str) -> dict:
         raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
 
     model_config = config["models"][model_id]
-    container_name = model_config["container_name"]
     engine = model_config["engine"]
 
+    # Invalidate cache since we're changing state
+    invalidate_cache()
+
+    # Script-based models use port check instead of container status
+    if engine == "script":
+        port = model_config["port"]
+        if await check_port_in_use(port):
+            return {"message": f"Model {model_id} is already running", "status": "running"}
+
+        # Run serve.sh script
+        try:
+            returncode, stdout, stderr = await run_model_script(model_config, "serve.sh")
+            if returncode != 0:
+                raise HTTPException(status_code=500, detail=f"Failed to start model: {stderr}")
+            return {
+                "message": f"Model {model_id} started successfully",
+                "status": "starting",
+                "port": port
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # Docker-based models
+    container_name = model_config["container_name"]
     # Check if already running (async)
     status = await get_container_status(container_name)
     if status == "running":
@@ -402,19 +424,14 @@ async def start_model(model_id: str) -> dict:
     if status == "stopped":
         await async_run_command(["docker", "rm", container_name])
 
-    # Invalidate cache since we're changing state
-    invalidate_cache()
-
     # Build and run command based on engine type
     try:
         if engine == "vllm":
             cmd = build_vllm_command(model_id, model_config)
             returncode, stdout, stderr = await async_run_command(cmd, timeout=30.0)
         elif engine == "trtllm":
-            # Ensure nginx CORS proxy is running for browser access
-            await ensure_nginx_cors_proxy()
-            cmd = build_trtllm_command(model_id, model_config)
-            returncode, stdout, stderr = await async_run_command(cmd, timeout=30.0)
+            # TRT-LLM models use local serve.sh scripts for full configuration control
+            returncode, stdout, stderr = await run_model_script(model_config, "serve.sh")
         elif engine == "ollama":
             cmd, model_to_pull = build_ollama_command(model_id, model_config)
             returncode, stdout, stderr = await async_run_command(cmd, timeout=30.0)
@@ -447,21 +464,37 @@ async def start_model(model_id: str) -> dict:
 
 @app.post("/api/models/{model_id}/stop")
 async def stop_model(model_id: str) -> dict:
-    """Stop a model container."""
+    """Stop a model container or script-based process."""
     config = load_models_config()
 
     if model_id not in config["models"]:
         raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
 
     model_config = config["models"][model_id]
-    container_name = model_config["container_name"]
-
-    status = await get_container_status(container_name)
-    if status != "running":
-        return {"message": f"Model {model_id} is not running", "status": status}
+    engine = model_config["engine"]
 
     # Invalidate cache since we're changing state
     invalidate_cache()
+
+    # Script-based models use stop.sh
+    if engine == "script":
+        port = model_config["port"]
+        if not await check_port_in_use(port):
+            return {"message": f"Model {model_id} is not running", "status": "stopped"}
+
+        try:
+            returncode, stdout, stderr = await run_model_script(model_config, "stop.sh")
+            # Give it a moment to stop
+            await asyncio.sleep(1)
+            return {"message": f"Model {model_id} stopped successfully", "status": "stopped"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # Docker-based models
+    container_name = model_config["container_name"]
+    status = await get_container_status(container_name)
+    if status != "running":
+        return {"message": f"Model {model_id} is not running", "status": status}
 
     try:
         returncode, _, stderr = await async_run_command(

@@ -1,0 +1,38 @@
+runtime: trtllm
+compile_backend: torch-cudagraph
+max_batch_size: 8
+max_seq_len: 16384
+enable_chunked_prefill: true
+attn_backend: flashinfer
+model_factory: AutoModelForCausalLM
+skip_loading_weights: false
+free_mem_ratio: 0.65
+cuda_graph_batch_sizes: [1, 2, 4, 8]
+kv_cache_config:
+  enable_block_reuse: false
+transforms:
+  detect_sharding:
+    sharding_dims: ['ep', 'bmm']
+    allreduce_strategy: 'AUTO'
+    manual_config:
+      head_dim: 128
+      tp_plan:
+        in_proj: "mamba"
+        out_proj: "rowwise"
+        q_proj: "colwise"
+        k_proj: "colwise"
+        v_proj: "colwise"
+        o_proj: "rowwise"
+        up_proj: "colwise"
+        down_proj: "rowwise"
+        fc1_latent_proj: "gather"
+        fc2_latent_proj: "gather"
+  multi_stream_moe:
+    stage: compile
+    enabled: true
+  insert_cached_ssm_attention:
+    cache_config:
+      mamba_dtype: float32
+  fuse_mamba_a_log:
+    stage: post_load_fusion
+    enabled: true
