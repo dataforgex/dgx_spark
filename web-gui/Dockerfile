@@ -16,27 +16,30 @@ COPY . .
 # Build the frontend
 RUN npm run build
 
-# Stage 2: Production image
-FROM python:3.11-slim
+# Stage 2: Production image with NVIDIA tools for nvidia-smi
+FROM nvidia/cuda:12.6.3-base-ubuntu24.04
 
 WORKDIR /app
 
-# Install system dependencies including Docker CLI
+# Install Python, pip, and system dependencies including Docker CLI
 RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
     curl \
     ca-certificates \
     gnupg \
     && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
     && chmod a+r /etc/apt/keyrings/docker.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list \
     && apt-get update \
     && apt-get install -y docker-ce-cli \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python requirements and install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Copy the Python API
 COPY metrics-api.py .
@@ -45,7 +48,7 @@ COPY metrics-api.py .
 COPY --from=frontend-builder /app/dist /app/dist
 
 # Install aiofiles for async file serving
-RUN pip install --no-cache-dir aiofiles
+RUN pip install --no-cache-dir --break-system-packages aiofiles
 
 # Create SPA-aware static file server
 RUN echo 'import http.server\n\
