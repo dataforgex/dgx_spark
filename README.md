@@ -33,8 +33,11 @@ cd vllm-qwen3-coder-30b-awq
 | Ministral-3-14B | vLLM | 8103 | General chat |
 | Qwen3-Coder-30B-AWQ | vLLM | 8104 | Code + tool calling |
 | Qwen3-VL-32B | Ollama | 11435 | Advanced vision |
+| **Qwen3-235B-AWQ** | vLLM | 8235 | **Distributed** (2-node) |
 
-**Recommended**: `qwen3-coder-30b-awq` - Best balance of speed (52 TPS) and features (tool calling for web search).
+**Single Node**: `qwen3-coder-30b-awq` - Best balance of speed (52 TPS) and features.
+
+**Multi-Node**: `qwen3-235b-awq` - 235B parameter model distributed across 2 DGX Sparks via Ray cluster with tensor parallelism.
 
 ## Project Structure
 
@@ -42,9 +45,12 @@ cd vllm-qwen3-coder-30b-awq
 dgx_spark/
 ├── web-gui/                    # React dashboard + chat (port 5173)
 ├── model-manager/              # Model start/stop API (port 5175)
+├── tool-call-sandbox/          # Code execution sandbox (port 5176)
 ├── models.json                 # Centralized model configuration
 ├── vllm-qwen3-coder-30b/       # Text/code model
 ├── vllm-qwen3-coder-30b-awq/   # AWQ quantized (fastest)
+├── vllm-qwen3-235b-awq/        # 235B distributed model (2-node)
+├── vllm-distributed-stacked-sparks/  # Shared Ray cluster scripts
 ├── vllm-qwen2-vl-7b/           # Vision model
 ├── vllm-mistral3-14b/          # Mistral model
 ├── ollama-qwen3-vl-32b/        # Ollama vision model
@@ -68,17 +74,34 @@ dgx_spark/
 - Automatic container lifecycle management
 - Health checks and status monitoring
 
-### Web Search (Tool Calling)
-Models with tool calling support can search the web:
+### Tool Calling (Web Search + Code Sandbox)
+
+Models with tool calling support can:
+- **Search the web** for real-time information
+- **Execute code** in a sandboxed Python/Bash environment
+
 ```
 User: What's the weather in Tokyo today?
 Assistant: [searches web] Based on current data...
+
+User: Calculate the first 50 prime numbers
+Assistant: [executes Python code] Here are the primes: [2, 3, 5, ...]
 ```
 
-Requires:
-1. SearXNG running: `cd searxng-docker && docker compose up -d`
-2. Model with tool calling (e.g., qwen3-coder-30b-awq)
-3. Search toggle enabled in chat
+**Available Tools:**
+| Tool | Description |
+|------|-------------|
+| `web_search` | Search the web via SearXNG |
+| `code_execution` | Execute Python/JS/Bash code |
+| `bash_command` | Run shell commands |
+| `data_storage` | Persist data across calls |
+| `file_analysis` | Analyze uploaded files |
+
+**Setup:**
+1. Start SearXNG: `cd searxng-docker && docker compose up -d`
+2. Start Sandbox: `cd tool-call-sandbox && ./serve.sh`
+3. Use a model with tool calling (e.g., qwen3-235b-awq)
+4. Enable Search and/or Sandbox toggles in chat
 
 ## API Usage
 
@@ -207,5 +230,6 @@ GPU_MEMORY_UTILIZATION=0.25  # Lower value
 | Web GUI | 5173 | Dashboard and chat |
 | Metrics API | 5174 | GPU/system metrics |
 | Model Manager | 5175 | Model lifecycle API |
-| SearXNG | 8888 | Local search engine |
-| Models | 8100-8104 | vLLM inference servers |
+| Tool Sandbox | 5176 | Code execution sandbox |
+| SearXNG | 8080 | Local search engine |
+| Models | 8100-8235 | vLLM inference servers |
