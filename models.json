@@ -78,6 +78,12 @@
       "engine": "script",
       "port": 8105,
       "script_dir": "vllm-nemotron-3-nano-30b-fp16"
+    },
+    "qwen3-235b-awq": {
+      "name": "Qwen3-235B-A22B-AWQ (Distributed)",
+      "engine": "script",
+      "port": 8235,
+      "script_dir": "vllm-qwen3-235b-awq"
     }
   }
 }

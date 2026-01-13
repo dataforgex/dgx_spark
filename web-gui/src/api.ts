@@ -94,6 +94,12 @@ export const AVAILABLE_MODELS: Record<string, ModelConfig> = {
     modelId: 'cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit',
     maxTokens: 2048,
   },
+  'qwen3-235b-awq': {
+    name: 'Qwen3-235B-AWQ (Distributed)',
+    port: 8235,
+    modelId: 'qwen3-235b-awq',
+    maxTokens: 2048,
+  },
 };
 
 export class ChatAPI {
@@ -117,23 +123,25 @@ export class ChatAPI {
     this.sessionId = crypto.randomUUID();
   }
 
-  // Estimate token count (rough approximation: ~4 chars per token)
+  // Estimate token count (very conservative: ~1.8 chars per token)
   private estimateTokens(messages: any[]): number {
     const text = JSON.stringify(messages);
-    return Math.ceil(text.length / 3.5); // Slightly conservative estimate
+    return Math.ceil(text.length / 1.8); // Very conservative to avoid context overflow
   }
 
   // Calculate safe max_tokens based on estimated input tokens
   private calculateMaxTokens(messages: any[]): number {
     const estimatedInputTokens = this.estimateTokens(messages);
-    const availableTokens = this.maxContextLength - estimatedInputTokens - 100; // 100 token buffer
-    const safeMaxTokens = Math.max(256, Math.min(this.maxTokens, availableTokens));
+    const availableTokens = this.maxContextLength - estimatedInputTokens - 300; // 300 token buffer
+    // Cap max_tokens to leave room for input growth
+    const maxAllowed = Math.min(this.maxTokens, Math.floor(this.maxContextLength * 0.4));
+    const safeMaxTokens = Math.max(256, Math.min(maxAllowed, availableTokens));
     console.log(`📊 Token estimate: ~${estimatedInputTokens} input, ${safeMaxTokens} max output`);
     return safeMaxTokens;
   }
 
   // Truncate tool result to prevent context overflow
-  private truncateToolResult(result: string, maxChars: number = 8000): string {
+  private truncateToolResult(result: string, maxChars: number = 3000): string {
     if (result.length <= maxChars) return result;
     const truncated = result.slice(0, maxChars);
     return truncated + `\n...[truncated, ${result.length - maxChars} chars omitted]`;
@@ -351,6 +359,37 @@ export class ChatAPI {
     return this.sandboxTools.some(t => t.function.name === toolName);
   }
 
+  // Parse <tool_call> tags from model content (Qwen3 format)
+  private parseToolCallsFromContent(content: string): any[] {
+    const toolCalls: any[] = [];
+    const regex = /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g;
+    let match;
+    let index = 0;
+
+    while ((match = regex.exec(content)) !== null) {
+      try {
+        const parsed = JSON.parse(match[1]);
+        if (parsed.name && parsed.arguments) {
+          toolCalls.push({
+            id: `call_${Date.now()}_${index}`,
+            type: 'function',
+            function: {
+              name: parsed.name,
+              arguments: typeof parsed.arguments === 'string'
+                ? parsed.arguments
+                : JSON.stringify(parsed.arguments)
+            }
+          });
+          index++;
+        }
+      } catch (e) {
+        console.warn('Failed to parse tool call:', match[1], e);
+      }
+    }
+
+    return toolCalls;
+  }
+
   // Execute a single tool by name and return structured result
   private async executeToolByName(
     toolCallId: string,
@@ -500,12 +539,24 @@ export class ChatAPI {
       const choice = result.choices[0];
 
       // Check if model wants to call any functions
-      if (!choice.message.tool_calls || choice.message.tool_calls.length === 0) {
+      // Also parse <tool_call> tags from content if tool_calls array is empty (Qwen3 format)
+      let toolCalls = choice.message.tool_calls || [];
+      if (toolCalls.length === 0 && choice.message.content) {
+        const parsedCalls = this.parseToolCallsFromContent(choice.message.content);
+        if (parsedCalls.length > 0) {
+          toolCalls = parsedCalls;
+          console.log('📝 Parsed tool calls from content:', toolCalls.length);
+        }
+      }
+
+      if (toolCalls.length === 0) {
         break; // No more tool calls, exit loop
       }
 
+      // Update the message's tool_calls for downstream processing
+      choice.message.tool_calls = toolCalls;
+
       iteration++;
-      const toolCalls = choice.message.tool_calls;
       console.log(`🔄 Tool call iteration ${iteration}: ${toolCalls.length} tool(s) requested`);
 
       // Execute ALL tool calls in parallel

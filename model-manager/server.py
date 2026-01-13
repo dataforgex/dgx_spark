@@ -25,19 +25,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Path to models.json (check /app first for Docker, then parent directory)
-MODELS_CONFIG_PATH = Path("/app/models.json") if Path("/app/models.json").exists() else Path(__file__).parent.parent / "models.json"
-
 # Base directory for model script directories (for engine: "script" models)
 # In Docker: set via MODELS_BASE_DIR env var (mounted at /app/models)
 # Local: use parent directory of this script
 MODELS_BASE_DIR = Path(os.environ.get("MODELS_BASE_DIR", str(Path(__file__).parent.parent)))
 
+# Path to models.json - uses MODELS_BASE_DIR for consistency
+MODELS_CONFIG_PATH = MODELS_BASE_DIR / "models.json"
+
 # When running in Docker, we need to use host paths for volume mounts
 # The container mounts host's ~/.cache/huggingface to /root/.cache/huggingface
 # So we write configs to /root/.cache/huggingface but mount using host path
 HOST_HOME = os.environ.get("HOST_HOME", str(Path.home()))
-HF_CACHE_DIR = Path("/root/.cache/huggingface") if Path("/app/models.json").exists() else Path.home() / ".cache" / "huggingface"
+IN_DOCKER = os.environ.get("MODELS_BASE_DIR") is not None
+HF_CACHE_DIR = Path("/root/.cache/huggingface") if IN_DOCKER else Path.home() / ".cache" / "huggingface"
 HOST_HF_CACHE_DIR = f"{HOST_HOME}/.cache/huggingface"
 
 # Cache for model status (TTL in seconds)
@@ -130,13 +131,14 @@ async def get_container_memory(container_name: str) -> Optional[int]:
 
 async def check_port_in_use(port: int) -> bool:
     """Check if a port is in use (for script-based models)."""
+    import socket
     try:
-        returncode, stdout, _ = await async_run_command(
-            ["ss", "-tlnp", f"sport = :{port}"],
-            timeout=5.0
-        )
-        # ss returns lines with LISTEN if port is in use
-        return "LISTEN" in stdout
+        # Try to connect to the port - if successful, something is listening
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        result = sock.connect_ex(('localhost', port))
+        sock.close()
+        return result == 0
     except Exception:
         return False
 
