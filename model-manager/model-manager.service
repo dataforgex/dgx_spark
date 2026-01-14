@@ -1,0 +1,35 @@
+[Unit]
+Description=DGX Spark Model Manager API
+Documentation=https://github.com/dataforgex/dgx_spark
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=dan
+Group=dan
+WorkingDirectory=/home/dan/danProjects/dgx_spark/model-manager
+
+# Environment
+Environment="MODELS_BASE_DIR=/home/dan/danProjects/dgx_spark"
+Environment="HOST_HOME=/home/dan"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+
+# Run the server using venv
+ExecStart=/home/dan/danProjects/dgx_spark/model-manager/venv/bin/python -m uvicorn server:app --host 0.0.0.0 --port 5175
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=50%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=model-manager
+
+[Install]
+WantedBy=multi-user.target

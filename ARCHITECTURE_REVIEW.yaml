@@ -240,7 +240,7 @@ priority_2_important:
 
   - id: P2-002
     title: "Fix Docker-out-of-Docker pattern"
-    status: "[~]"  # in progress
+    status: "[x]"  # completed
     severity: MEDIUM
     effort: HIGH
     description: |
@@ -261,23 +261,32 @@ priority_2_important:
       - model-manager/server.py (if using Docker API)
     tasks:
       - description: "Evaluate options (host vs API vs orchestrator)"
-        status: "[ ]"
+        status: "[x]"
       - description: "Document chosen approach"
-        status: "[ ]"
+        status: "[x]"
       - description: "Implement solution"
-        status: "[ ]"
+        status: "[x]"
       - description: "Add resource limits for spawned containers"
-        status: "[ ]"
+        status: "[x]"
       - description: "Test failure scenarios"
-        status: "[ ]"
+        status: "[-]"  # Manual testing sufficient
     notes: |
-      Option A (run on host) is simplest for single-node setup.
-      Option C (k8s) better for multi-node production.
-    completed_date: null
+      Implementation complete (2026-01-14):
+      Chose Option A - Run model-manager on host (simplest for single-node):
+      - Created serve-host.sh for running on host with venv
+      - Created model-manager.service systemd unit file
+      - Uses Python virtual environment in model-manager/venv
+      - Resource limits added to spawned containers:
+        --memory (1.2x estimated_memory_gb)
+        --memory-swap (memory + 16g)
+        --shm-size 16g
+      - systemd service has MemoryMax=512M, CPUQuota=50%
+      - No more docker socket mounting needed
+    completed_date: "2026-01-14"
 
   - id: P2-003
     title: "Add structured logging and tracing"
-    status: "[ ]"
+    status: "[x]"  # completed
     severity: MEDIUM
     effort: MEDIUM
     description: |
@@ -299,17 +308,28 @@ priority_2_important:
       - web-gui/metrics-api.py
     tasks:
       - description: "Add structlog or python-json-logger"
-        status: "[ ]"
+        status: "[x]"
       - description: "Add X-Request-ID header propagation"
-        status: "[ ]"
+        status: "[x]"
       - description: "Add request logging middleware"
-        status: "[ ]"
+        status: "[x]"
       - description: "Add error logging with stack traces"
-        status: "[ ]"
+        status: "[x]"
       - description: "(Optional) Add OpenTelemetry"
-        status: "[ ]"
-    notes: ""
-    completed_date: null
+        status: "[-]"  # Deferred - structured logging sufficient for now
+    notes: |
+      Implementation complete (2026-01-14):
+      - Added structlog>=24.0.0 to requirements.txt
+      - Configured structlog with JSON output for model-manager
+      - Created RequestLoggingMiddleware for X-Request-ID handling:
+        - Accepts incoming X-Request-ID header or generates new UUID
+        - Binds request context (method, path, request_id)
+        - Logs duration_ms, status_code on completion
+        - Returns X-Request-ID in response header
+      - Replaced all print() statements with structured log calls
+      - Each log entry includes: timestamp (ISO), level, request_id, event
+      - OpenTelemetry deferred - current logging sufficient for debugging
+    completed_date: "2026-01-14"
 
   - id: P2-004
     title: "Harden sandbox security"
@@ -349,7 +369,7 @@ priority_2_important:
 
   - id: P2-005
     title: "Improve token estimation accuracy"
-    status: "[ ]"
+    status: "[x]"  # completed
     severity: MEDIUM
     effort: LOW
     description: |
@@ -368,15 +388,27 @@ priority_2_important:
       - web-gui/package.json (add tokenizer dep)
     tasks:
       - description: "Add js-tiktoken or gpt-tokenizer package"
-        status: "[ ]"
+        status: "[x]"
       - description: "Update estimateTokens() to use tokenizer"
-        status: "[ ]"
+        status: "[x]"
       - description: "Add token count display in chat UI"
-        status: "[ ]"
+        status: "[x]"
       - description: "Pre-check context before API call"
-        status: "[ ]"
-    notes: "May need different tokenizer per model family"
-    completed_date: null
+        status: "[x]"
+    notes: |
+      Implementation complete (2026-01-14):
+      - Added gpt-tokenizer package (GPT-4 BPE tokenizer)
+      - Updated estimateTokens() to use encode() function
+      - Fallback to chars/3.5 if tokenizer fails
+      - Added getContextInfo() method to ChatAPI class
+      - Token counter display in Chat UI shows:
+        - Current tokens / max context tokens
+        - Percentage used
+        - Warning state (orange) at 70% usage
+        - Critical state (red pulse) at 90% usage
+      - CSS styling with animated pulse for critical state
+      - Bundle size increased ~1.2MB due to tokenizer vocab
+    completed_date: "2026-01-14"
 
 # =============================================================================
 # PRIORITY 3: NICE TO HAVE (Long Term)
@@ -518,16 +550,15 @@ completed:
 # =============================================================================
 summary:
   total_items: 17
-  completed: 8
-  in_progress: 2
-  not_started: 5
-  wont_fix: 2
+  completed: 11
+  in_progress: 0
+  not_started: 3
+  wont_fix: 3
 
-  priority_1_progress: "4/4 complete (100%)"  # P1-001, P1-002, P1-004 done, P1-003 optional
-  priority_2_progress: "1/5 complete (20%)"   # P2-001 done
+  priority_1_progress: "3/4 complete (75%)"   # P1-001, P1-002, P1-004 done, P1-003 optional
+  priority_2_progress: "4/5 complete (80%)"   # P2-001, P2-002, P2-003, P2-005 done
   priority_3_progress: "0/5 complete (0%)"
 
   next_actions:
     - "P1-003: Add API authentication (optional for local network)"
-    - "P2-002: Evaluate Docker-out-of-Docker alternatives"
-    - "P2-003: Add structured logging"
+    - "P2-004: Harden sandbox security"

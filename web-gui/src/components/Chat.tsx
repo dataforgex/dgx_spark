@@ -64,6 +64,7 @@ export function Chat() {
   const [error, setError] = useState<string | null>(null);
   const [runningModels, setRunningModels] = useState<Set<string>>(new Set());
   const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [contextInfo, setContextInfo] = useState<{ tokens: number; maxContext: number; percentUsed: number } | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef(new ChatAPI(selectedModel));
 
@@ -124,6 +125,16 @@ export function Chat() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentChat?.messages, chatId]);
+
+  // Update context/token info when messages change
+  useEffect(() => {
+    if (currentChat?.messages && currentChat.messages.length > 0) {
+      const info = apiRef.current.getContextInfo(currentChat.messages);
+      setContextInfo(info);
+    } else {
+      setContextInfo(null);
+    }
+  }, [currentChat?.messages]);
 
   // Redirect to a new chat if accessing /chat root and we have history, 
   // OR just stay at /chat as a "new chat" placeholder.
@@ -363,6 +374,13 @@ export function Chat() {
           <div ref={chatEndRef} />
         </div>
 
+        {contextInfo && (
+          <div className="context-info">
+            <span className={`token-count ${contextInfo.percentUsed > 70 ? 'warning' : ''} ${contextInfo.percentUsed > 90 ? 'critical' : ''}`}>
+              {contextInfo.tokens.toLocaleString()} / {contextInfo.maxContext.toLocaleString()} tokens ({contextInfo.percentUsed}%)
+            </span>
+          </div>
+        )}
         <ChatInput onSend={handleSend} disabled={isLoading} />
       </div>
     </div>

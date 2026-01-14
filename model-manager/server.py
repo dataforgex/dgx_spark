@@ -8,14 +8,34 @@ import os
 import subprocess
 import asyncio
 import time
+import uuid
 import httpx
 import yaml
+import structlog
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+
+# Configure structlog for JSON logging
+import logging
+structlog.configure(
+    processors=[
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.JSONRenderer()
+    ],
+    wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+    context_class=dict,
+    logger_factory=structlog.PrintLoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+
+log = structlog.get_logger()
 
 # Track models that are starting up
 # Format: {model_id: {"start_time": float, "port": int, "timeout": int, "checks": int}}
@@ -44,7 +64,7 @@ async def health_check_loop():
 
                 # Check timeout
                 if elapsed > info["timeout"]:
-                    print(f"[health] Model {model_id} startup timed out after {elapsed:.0f}s")
+                    log.warning("model_startup_timeout", model_id=model_id, elapsed_seconds=int(elapsed))
                     completed.append(model_id)
                     continue
 
@@ -53,11 +73,11 @@ async def health_check_loop():
                 info["checks"] += 1
 
                 if is_healthy:
-                    print(f"[health] Model {model_id} is ready after {elapsed:.0f}s ({info['checks']} checks)")
+                    log.info("model_ready", model_id=model_id, elapsed_seconds=int(elapsed), health_checks=info['checks'])
                     completed.append(model_id)
                 else:
                     if info["checks"] % 6 == 0:  # Log every 30s
-                        print(f"[health] Model {model_id} still starting... {elapsed:.0f}s elapsed")
+                        log.debug("model_starting", model_id=model_id, elapsed_seconds=int(elapsed))
 
             # Remove completed models from tracking
             for model_id in completed:
@@ -69,7 +89,7 @@ async def lifespan(app: FastAPI):
     """Manage startup and shutdown of background tasks."""
     # Start health check loop
     health_task = asyncio.create_task(health_check_loop())
-    print("[startup] Health check background task started")
+    log.info("health_check_task_started")
     yield
     # Cleanup on shutdown
     health_task.cancel()
@@ -80,6 +100,52 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Model Manager API", version="1.0.0", lifespan=lifespan)
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Middleware for request logging with X-Request-ID propagation."""
+
+    async def dispatch(self, request: Request, call_next):
+        # Get or generate request ID
+        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4())[:8])
+
+        # Bind request context for structured logging
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+        )
+
+        start_time = time.time()
+
+        try:
+            response = await call_next(request)
+            duration_ms = (time.time() - start_time) * 1000
+
+            # Log request completion
+            log.info(
+                "request_completed",
+                status_code=response.status_code,
+                duration_ms=round(duration_ms, 2)
+            )
+
+            # Add request ID to response headers
+            response.headers["X-Request-ID"] = request_id
+            return response
+
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            log.error(
+                "request_failed",
+                error=str(e),
+                duration_ms=round(duration_ms, 2)
+            )
+            raise
+
+
+# Add request logging middleware
+app.add_middleware(RequestLoggingMiddleware)
 
 # CORS for web-gui
 app.add_middleware(
@@ -174,7 +240,7 @@ async def get_unified_memory_info() -> UnifiedMemoryInfo:
                 elif line.startswith("MemAvailable:"):
                     available_kb = int(line.split()[1])
     except Exception as e:
-        print(f"[memory] Error reading /proc/meminfo: {e}")
+        log.error("memory_read_error", source="/proc/meminfo", error=str(e))
 
     total_gb = total_kb / 1024 / 1024
     available_gb = available_kb / 1024 / 1024
@@ -204,7 +270,7 @@ async def get_unified_memory_info() -> UnifiedMemoryInfo:
                     except (ValueError, IndexError):
                         continue
     except Exception as e:
-        print(f"[memory] Error querying nvidia-smi: {e}")
+        log.error("memory_read_error", source="nvidia-smi", error=str(e))
 
     return UnifiedMemoryInfo(
         total_gb=round(total_gb, 1),
@@ -383,9 +449,9 @@ def load_models_config() -> dict:
 
     # Log result
     format_type = "" if is_yaml else " (legacy JSON)"
-    print(f"[config] Loaded {len(config['models'])} models from {config_path}{format_type}")
+    log.info("config_loaded", model_count=len(config['models']), config_path=str(config_path), format=format_type.strip() or "yaml")
     for warning in warnings:
-        print(f"[config] WARNING: {warning}")
+        log.warning("config_warning", message=warning)
 
     _config_cache["config"] = config
     _config_cache["mtime"] = mtime
@@ -579,7 +645,7 @@ async def register_starting_model(model_id: str, port: int, timeout: int = DEFAU
             "timeout": timeout,
             "checks": 0
         }
-    print(f"[health] Registered model {model_id} for health monitoring (port {port}, timeout {timeout}s)")
+    log.info("health_monitor_registered", model_id=model_id, port=port, timeout_seconds=timeout)
 
 
 async def unregister_starting_model(model_id: str):
@@ -628,12 +694,20 @@ def build_vllm_command(model_id: str, model_config: dict) -> list:
     image = model_config.get("image", "nvcr.io/nvidia/vllm:25.11-py3")
     model = model_config["model_id"]
 
-    # Docker run command
+    # Docker run command with resource limits
+    estimated_mem_gb = model_config.get("estimated_memory_gb", 32)
+    # Allow 20% overhead for model loading, minimum 8GB
+    memory_limit_gb = max(8, int(estimated_mem_gb * 1.2))
+
     cmd = [
         "docker", "run", "-d",
         "--name", container_name,
         "--gpus", settings.get("gpus", "all"),
         "--ipc=host",
+        # Resource limits for container
+        "--memory", f"{memory_limit_gb}g",
+        "--memory-swap", f"{memory_limit_gb + 16}g",  # Allow 16GB swap
+        "--shm-size", "16g",  # Shared memory for NCCL/model loading
         "--ulimit", f"memlock={settings.get('ulimit_memlock', -1)}",
         "--ulimit", f"stack={settings.get('ulimit_stack', 67108864)}",
         "-p", f"{port}:8000",
@@ -697,10 +771,18 @@ def build_ollama_command(model_id: str, model_config: dict) -> list:
     ollama_dir = Path.home() / ".ollama"
     ollama_dir.mkdir(exist_ok=True)
 
+    # Resource limits based on estimated memory
+    estimated_mem_gb = model_config.get("estimated_memory_gb", 32)
+    memory_limit_gb = max(8, int(estimated_mem_gb * 1.2))
+
     cmd = [
         "docker", "run", "-d",
         "--name", container_name,
         "--gpus", "all",
+        # Resource limits
+        "--memory", f"{memory_limit_gb}g",
+        "--memory-swap", f"{memory_limit_gb + 16}g",
+        "--shm-size", "8g",
         "-p", f"{port}:11434",
         "-v", f"{ollama_dir}:/root/.ollama",
         "--restart", "unless-stopped",

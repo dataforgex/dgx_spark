@@ -1,5 +1,6 @@
 import type { ChatRequest, ModelInfo, SearchResult } from './types';
 import { getApiHost, SERVICES } from './config';
+import { encode } from 'gpt-tokenizer';
 
 export interface ModelConfig {
   name: string;
@@ -116,10 +117,17 @@ export class ChatAPI {
     this.sessionId = crypto.randomUUID();
   }
 
-  // Estimate token count (very conservative: ~1.8 chars per token)
+  // Estimate token count using GPT tokenizer (good approximation for Qwen/Mistral models)
   private estimateTokens(messages: any[]): number {
-    const text = JSON.stringify(messages);
-    return Math.ceil(text.length / 1.8); // Very conservative to avoid context overflow
+    try {
+      const text = JSON.stringify(messages);
+      const tokens = encode(text);
+      return tokens.length;
+    } catch {
+      // Fallback to character-based estimate if tokenizer fails
+      const text = JSON.stringify(messages);
+      return Math.ceil(text.length / 3.5); // Average ~3.5 chars per token
+    }
   }
 
   // Calculate safe max_tokens based on estimated input tokens
@@ -256,6 +264,16 @@ export class ChatAPI {
       this.model = config.modelId;
       this.maxTokens = config.maxTokens;
     }
+  }
+
+  // Get context usage info for UI display
+  getContextInfo(messages: any[]): { tokens: number; maxContext: number; percentUsed: number } {
+    const tokens = this.estimateTokens(messages);
+    return {
+      tokens,
+      maxContext: this.maxContextLength,
+      percentUsed: Math.round((tokens / this.maxContextLength) * 100)
+    };
   }
 
   async fetchModelInfo(): Promise<number | null> {
