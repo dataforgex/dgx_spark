@@ -113,16 +113,14 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  position: relative;
   min-width: 0;
-  /* Prevent flex child overflow */
+  min-height: 0; /* Critical for flex children to scroll */
+  overflow: hidden;
 }
 
 /* Reuse existing styles but scoped to chat-main where appropriate */
 .chat-header {
   background: rgba(15, 23, 42, 0.6);
-  /* Slightly more transparent */
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--glass-border);
   padding: 1rem 2rem;
@@ -130,6 +128,7 @@
   justify-content: space-between;
   align-items: center;
   z-index: 10;
+  flex-shrink: 0; /* Don't shrink on mobile */
 }
 
 .chat-title {
@@ -256,6 +255,7 @@
 .messages-container {
   flex: 1;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
   padding: 2rem;
   scroll-behavior: smooth;
   display: flex;
@@ -264,6 +264,7 @@
   max-width: 900px;
   margin: 0 auto;
   width: 100%;
+  min-height: 0; /* Allow scrolling in flex container */
 }
 
 /* Adjust input container to match main width */
@@ -321,14 +322,16 @@
 /* Mobile Responsive Styles */
 @media (max-width: 768px) {
   .chat-layout {
-    height: calc(100vh - 50px); /* Smaller nav on mobile */
+    height: calc(100vh - 50px); /* Fallback */
+    height: calc(100dvh - 50px); /* Dynamic viewport */
   }
 
   .chat-sidebar {
     position: fixed;
     left: 0;
-    top: 50px; /* Below navigation */
-    height: calc(100vh - 50px);
+    top: 50px;
+    height: calc(100vh - 50px); /* Fallback */
+    height: calc(100dvh - 50px); /* Dynamic viewport */
     z-index: 100;
     transform: translateX(-100%);
   }
@@ -405,7 +408,8 @@
   }
 
   .chat-input-container {
-    padding: 0 1rem 1rem;
+    padding: 0.75rem 1rem;
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); /* Safe area for notched phones */
   }
 
   .menu-button {

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Component } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChatAPI, AVAILABLE_MODELS } from '../api';
 import { SERVICES } from '../config';
@@ -8,16 +9,47 @@ import { ChatInput } from './ChatInput';
 import { ChatSidebar } from './ChatSidebar';
 import './Chat.css';
 
+// Error boundary to catch rendering errors
+class ChatErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: string }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: '' };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error.message };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('Chat error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '2rem', color: 'white', background: '#1e293b', minHeight: '50vh' }}>
+          <h2>Something went wrong</h2>
+          <p style={{ color: '#ef4444' }}>{this.state.error}</p>
+          <button onClick={() => window.location.reload()} style={{ marginTop: '1rem', padding: '0.5rem 1rem' }}>
+            Reload Page
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const getSystemMessage = (hasSearch: boolean, hasSandbox: boolean) => {
   let msg = 'You are a helpful AI assistant.';
   if (hasSearch) {
-    msg += ' You have access to a web_search tool for current information, news, weather, or any data that might have changed recently.';
+    msg += ' You have access to a web_search tool. Only use it when the user explicitly asks for current news, weather, prices, or real-time information that you cannot answer from your training data.';
   }
   if (hasSandbox) {
-    msg += ' You have access to sandbox tools for executing code (Python, bash, Node.js), analyzing files, and storing data. Use code_execution when calculations, data processing, or programming tasks are requested. Use data_storage to save and retrieve data between interactions.';
+    msg += ' You have access to sandbox tools for executing code (Python, bash, Node.js). Only use these when the user explicitly asks for code execution, calculations, or data processing.';
   }
   if (hasSearch || hasSandbox) {
-    msg += ' Always prefer using your tools when appropriate rather than saying you cannot do something.';
+    msg += ' Do NOT use tools for simple greetings or conversational messages.';
   }
   return msg;
 };
@@ -25,29 +57,46 @@ const getSystemMessage = (hasSearch: boolean, hasSandbox: boolean) => {
 // Use centralized service URL from config
 const MODEL_MANAGER_API = SERVICES.MODEL_MANAGER;
 
+// Safe localStorage access for mobile browsers
+const safeGetItem = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const safeSetItem = (key: string, value: string): void => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    console.warn('localStorage not available');
+  }
+};
+
 interface ManagedModel {
   id: string;
   name: string;
   status: string;
 }
 
-export function Chat() {
+function ChatInner() {
   const { chatId } = useParams();
   const navigate = useNavigate();
   const [conversations, setConversations] = useState<Record<string, Conversation>>(() => {
-    const saved = localStorage.getItem('chat_conversations');
+    const saved = safeGetItem('chat_conversations');
     return saved ? JSON.parse(saved) : {};
   });
   const [selectedModel, setSelectedModel] = useState<string>(() => {
-    const saved = localStorage.getItem('selected_model');
+    const saved = safeGetItem('selected_model');
     return saved || 'qwen3-coder-30b';
   });
   const [enableSearch, setEnableSearch] = useState<boolean>(() => {
-    const saved = localStorage.getItem('enable_search');
+    const saved = safeGetItem('enable_search');
     return saved === 'true';
   });
   const [enableSandbox, setEnableSandbox] = useState<boolean>(() => {
-    const saved = localStorage.getItem('enable_sandbox');
+    const saved = safeGetItem('enable_sandbox');
     return saved === 'true';
   });
   const [sandboxAvailable, setSandboxAvailable] = useState(false);
@@ -108,19 +157,19 @@ export function Chat() {
   }, [selectedModel]);
 
   useEffect(() => {
-    localStorage.setItem('chat_conversations', JSON.stringify(conversations));
+    safeSetItem('chat_conversations', JSON.stringify(conversations));
   }, [conversations]);
 
   useEffect(() => {
-    localStorage.setItem('selected_model', selectedModel);
+    safeSetItem('selected_model', selectedModel);
   }, [selectedModel]);
 
   useEffect(() => {
-    localStorage.setItem('enable_search', enableSearch.toString());
+    safeSetItem('enable_search', enableSearch.toString());
   }, [enableSearch]);
 
   useEffect(() => {
-    localStorage.setItem('enable_sandbox', enableSandbox.toString());
+    safeSetItem('enable_sandbox', enableSandbox.toString());
   }, [enableSandbox]);
 
   useEffect(() => {
@@ -208,7 +257,7 @@ export function Chat() {
         // Critical: Read localStorage at the moment of update to avoid race conditions
         // This ensures we don't overwrite updates from other chats
         const updateConversation = () => {
-          const savedConversations = localStorage.getItem('chat_conversations');
+          const savedConversations = safeGetItem('chat_conversations');
           const currentConversations = savedConversations ? JSON.parse(savedConversations) : {};
 
           if (currentConversations[activeChatId!]) {
@@ -226,7 +275,7 @@ export function Chat() {
                 messages: [...existingMessages, assistantMessage],
                 timestamp: Date.now()
               };
-              localStorage.setItem('chat_conversations', JSON.stringify(currentConversations));
+              safeSetItem('chat_conversations', JSON.stringify(currentConversations));
             }
           }
 
@@ -394,5 +443,14 @@ export function Chat() {
         <ChatInput onSend={handleSend} disabled={isLoading} />
       </div>
     </div>
+  );
+}
+
+// Export wrapped with error boundary
+export function Chat() {
+  return (
+    <ChatErrorBoundary>
+      <ChatInner />
+    </ChatErrorBoundary>
   );
 }

@@ -2,6 +2,19 @@ import type { ChatRequest, ModelInfo, SearchResult } from './types';
 import { getApiHost, SERVICES } from './config';
 import { encode } from 'gpt-tokenizer';
 
+// UUID generator with fallback for browsers without crypto.randomUUID (e.g., HTTP contexts)
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback for older browsers or non-secure contexts
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 // Model config from model-manager API
 export interface ModelConfig {
   id: string;
@@ -222,7 +235,7 @@ export class ChatAPI {
     this.model = fallback?.modelId || modelKey;
     this.maxTokens = fallback?.maxTokens || 2048;
     this.temperature = temperature;
-    this.sessionId = crypto.randomUUID();
+    this.sessionId = generateUUID();
 
     // Async load full config from registry
     this.loadModelConfig(modelKey);

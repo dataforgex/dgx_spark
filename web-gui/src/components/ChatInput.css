@@ -6,8 +6,7 @@
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
   border-top: 1px solid var(--glass-border);
-  position: sticky;
-  bottom: 0;
+  flex-shrink: 0; /* Don't shrink - more reliable than sticky on mobile */
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
   z-index: 10;
 }
