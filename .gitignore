@@ -52,3 +52,4 @@ ngc/ngc-cli
 # Project directories to ignore
 eurlex/
 errors/
+fps-game/
