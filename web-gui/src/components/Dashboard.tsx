@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -95,6 +95,28 @@ export function Dashboard() {
   const [modelActions, setModelActions] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Cache for chart gradients to prevent memory leaks
+  // Gradients are created once per chart context and reused
+  const gradientCacheRef = useRef<Map<string, CanvasGradient>>(new Map())
+
+  // Helper to get or create a cached gradient
+  const getGradient = useCallback((
+    ctx: CanvasRenderingContext2D,
+    key: string,
+    colorStart: string,
+    colorEnd: string
+  ): CanvasGradient => {
+    const cache = gradientCacheRef.current
+    if (cache.has(key)) {
+      return cache.get(key)!
+    }
+    const gradient = ctx.createLinearGradient(0, 0, 0, 200)
+    gradient.addColorStop(0, colorStart)
+    gradient.addColorStop(1, colorEnd)
+    cache.set(key, gradient)
+    return gradient
+  }, [])
 
   // Use centralized service URLs from config
   const API_BASE = SERVICES.METRICS_API
@@ -289,10 +311,8 @@ export function Dashboard() {
         borderColor: idx === 0 ? '#3b82f6' : '#6366f1', // Blue 500 or Indigo 500
         backgroundColor: (context: ScriptableContext<'line'>) => {
           const ctx = context.chart.ctx
-          const gradient = ctx.createLinearGradient(0, 0, 0, 200)
-          gradient.addColorStop(0, idx === 0 ? 'rgba(59, 130, 246, 0.5)' : 'rgba(99, 102, 241, 0.5)')
-          gradient.addColorStop(1, 'rgba(59, 130, 246, 0.0)')
-          return gradient
+          const colorStart = idx === 0 ? 'rgba(59, 130, 246, 0.5)' : 'rgba(99, 102, 241, 0.5)'
+          return getGradient(ctx, `gpu-util-${idx}`, colorStart, 'rgba(59, 130, 246, 0.0)')
         },
         tension: 0.5, // Increased from 0.4 for smoother curves
         fill: true,
@@ -311,10 +331,7 @@ export function Dashboard() {
         borderColor: '#f59e0b', // Amber 500
         backgroundColor: (context: ScriptableContext<'line'>) => {
           const ctx = context.chart.ctx
-          const gradient = ctx.createLinearGradient(0, 0, 0, 200)
-          gradient.addColorStop(0, 'rgba(245, 158, 11, 0.5)')
-          gradient.addColorStop(1, 'rgba(245, 158, 11, 0.0)')
-          return gradient
+          return getGradient(ctx, `gpu-temp-${idx}`, 'rgba(245, 158, 11, 0.5)', 'rgba(245, 158, 11, 0.0)')
         },
         tension: 0.5, // Increased from 0.4 for smoother curves
         fill: true,

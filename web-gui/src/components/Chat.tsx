@@ -57,6 +57,39 @@ const getSystemMessage = (hasSearch: boolean, hasSandbox: boolean) => {
 // Use centralized service URL from config
 const MODEL_MANAGER_API = SERVICES.MODEL_MANAGER;
 
+// Memory management limits to prevent browser crashes
+const MAX_CONVERSATIONS = 50;  // Keep last 50 conversations
+const MAX_MESSAGES_PER_CONVERSATION = 200;  // Keep last 200 messages per conversation
+
+// Prune old conversations, keeping most recent by timestamp
+const pruneConversations = (convs: Record<string, Conversation>): Record<string, Conversation> => {
+  const entries = Object.entries(convs);
+  if (entries.length <= MAX_CONVERSATIONS) return convs;
+
+  // Sort by timestamp descending (newest first)
+  entries.sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0));
+
+  // Keep only the most recent conversations
+  const pruned = entries.slice(0, MAX_CONVERSATIONS);
+  console.log(`Pruned ${entries.length - MAX_CONVERSATIONS} old conversations`);
+  return Object.fromEntries(pruned);
+};
+
+// Prune old messages in a conversation, keeping system message and most recent
+const pruneMessages = (messages: Message[]): Message[] => {
+  if (messages.length <= MAX_MESSAGES_PER_CONVERSATION) return messages;
+
+  // Keep system message (first) and most recent messages
+  const systemMsg = messages.find(m => m.role === 'system');
+  const nonSystemMsgs = messages.filter(m => m.role !== 'system');
+
+  // Keep the most recent messages (excluding system)
+  const keptMessages = nonSystemMsgs.slice(-(MAX_MESSAGES_PER_CONVERSATION - 1));
+
+  console.log(`Pruned ${nonSystemMsgs.length - keptMessages.length} old messages`);
+  return systemMsg ? [systemMsg, ...keptMessages] : keptMessages;
+};
+
 // Safe localStorage access for mobile browsers
 const safeGetItem = (key: string): string | null => {
   try {
@@ -85,7 +118,10 @@ function ChatInner() {
   const navigate = useNavigate();
   const [conversations, setConversations] = useState<Record<string, Conversation>>(() => {
     const saved = safeGetItem('chat_conversations');
-    return saved ? JSON.parse(saved) : {};
+    if (!saved) return {};
+    const parsed = JSON.parse(saved);
+    // Prune on load to clean up any accumulated data
+    return pruneConversations(parsed);
   });
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     const saved = safeGetItem('selected_model');
@@ -218,14 +254,14 @@ function ChatInner() {
         timestamp: Date.now()
       };
 
-      setConversations(prev => ({ ...prev, [newId]: newConversation }));
+      setConversations(prev => pruneConversations({ ...prev, [newId]: newConversation }));
       activeChatId = newId;
       updatedMessages = newConversation.messages;
       navigate(`/chat/${newId}`);
     } else {
       // Update existing
       const chat = conversations[activeChatId];
-      updatedMessages = [...chat.messages, userMessage];
+      updatedMessages = pruneMessages([...chat.messages, userMessage]);
 
       setConversations(prev => ({
         ...prev,
@@ -272,10 +308,10 @@ function ChatInner() {
             if (!hasResponse) {
               currentConversations[activeChatId!] = {
                 ...currentConversations[activeChatId!],
-                messages: [...existingMessages, assistantMessage],
+                messages: pruneMessages([...existingMessages, assistantMessage]),
                 timestamp: Date.now()
               };
-              safeSetItem('chat_conversations', JSON.stringify(currentConversations));
+              safeSetItem('chat_conversations', JSON.stringify(pruneConversations(currentConversations)));
             }
           }
 
@@ -292,7 +328,7 @@ function ChatInner() {
               ...prev,
               [activeChatId!]: {
                 ...prev[activeChatId!],
-                messages: [...prev[activeChatId!].messages, assistantMessage],
+                messages: pruneMessages([...prev[activeChatId!].messages, assistantMessage]),
                 timestamp: Date.now()
               }
             };

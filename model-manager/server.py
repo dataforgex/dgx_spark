@@ -15,8 +15,9 @@ import yaml
 import structlog
 from pathlib import Path
 
-# Add parent directory to path for shared module
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add shared module to path (MODELS_BASE_DIR in Docker, parent dir locally)
+_base_dir = os.environ.get("MODELS_BASE_DIR", str(Path(__file__).parent.parent))
+sys.path.insert(0, _base_dir)
 from shared.auth import add_auth_middleware, get_client_ip
 
 from typing import Optional
@@ -795,6 +796,8 @@ def build_ollama_command(model_id: str, model_config: dict) -> list:
         "--shm-size", "8g",
         "-p", f"{port}:11434",
         "-v", f"{ollama_dir}:/root/.ollama",
+        # CORS: Allow all origins for local development
+        "-e", "OLLAMA_ORIGINS=*",
         "--restart", "unless-stopped",
         image
     ]
@@ -1118,12 +1121,19 @@ async def start_model(model_id: str, force: bool = False) -> dict:
             cmd, model_to_pull = build_ollama_command(model_id, model_config)
             returncode, stdout, stderr = await async_run_command(cmd, timeout=30.0)
             if returncode == 0:
-                # Pull the model after container starts
-                await asyncio.sleep(2)
-                await async_run_command(
-                    ["docker", "exec", container_name, "ollama", "pull", model_to_pull],
-                    timeout=600.0
-                )
+                # Pull the model in background so endpoint can return immediately
+                async def pull_model_background():
+                    await asyncio.sleep(2)
+                    log.info("ollama_pull_started", model_id=model_id, model=model_to_pull)
+                    try:
+                        await async_run_command(
+                            ["docker", "exec", container_name, "ollama", "pull", model_to_pull],
+                            timeout=600.0
+                        )
+                        log.info("ollama_pull_completed", model_id=model_id, model=model_to_pull)
+                    except Exception as e:
+                        log.error("ollama_pull_failed", model_id=model_id, error=str(e))
+                asyncio.create_task(pull_model_background())
         else:
             raise HTTPException(status_code=400, detail=f"Unknown engine: {engine}")
 

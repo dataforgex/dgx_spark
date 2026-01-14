@@ -48,6 +48,53 @@ app.add_middleware(
 add_auth_middleware(app)
 
 
+def get_gpu_process_memory() -> Dict[int, float]:
+    """Get GPU memory usage by summing per-process memory (for GPUs that don't report total)"""
+    try:
+        # First try direct nvidia-smi
+        cmd = [
+            "nvidia-smi",
+            "--query-compute-apps=gpu_uuid,used_memory",
+            "--format=csv,noheader,nounits",
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+        total_memory = 0.0
+        for line in result.stdout.strip().split("\n"):
+            if line:
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) >= 2:
+                    try:
+                        total_memory += float(parts[1])
+                    except ValueError:
+                        pass
+
+        # If no processes found, try via docker with host PID namespace
+        # This is needed when running inside a container
+        if total_memory == 0.0:
+            docker_cmd = [
+                "docker", "run", "--rm", "--pid=host", "--gpus", "all",
+                "nvidia/cuda:12.0.0-base-ubuntu20.04",
+                "nvidia-smi", "--query-compute-apps=pid,used_memory",
+                "--format=csv,noheader,nounits"
+            ]
+            result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                for line in result.stdout.strip().split("\n"):
+                    if line:
+                        parts = [p.strip() for p in line.split(",")]
+                        if len(parts) >= 2:
+                            try:
+                                total_memory += float(parts[1])
+                            except ValueError:
+                                pass
+
+        return {0: total_memory}  # Return dict keyed by GPU index
+    except Exception as e:
+        print(f"Error getting GPU process memory: {e}")
+        return {}
+
+
 def get_gpu_metrics() -> List[Dict[str, Any]]:
     """Get GPU metrics using nvidia-smi"""
     try:
@@ -69,17 +116,34 @@ def get_gpu_metrics() -> List[Dict[str, Any]]:
                 return default
 
         gpus = []
+        process_memory = None  # Lazy load only if needed
+
         for line in result.stdout.strip().split("\n"):
             if line:
                 parts = [p.strip() for p in line.split(",")]
+                gpu_index = int(parts[0])
+                memory_used = safe_float(parts[5])
+                memory_total = safe_float(parts[6], 0.0)
+
+                # If memory reports N/A, try to get it from process list
+                if memory_used == 0.0 and memory_total == 0.0:
+                    if process_memory is None:
+                        process_memory = get_gpu_process_memory()
+                    memory_used = process_memory.get(gpu_index, 0.0)
+                    # GB10 has 128GB unified memory, use that as total
+                    if "GB10" in parts[1]:
+                        memory_total = 128 * 1024  # 128 GB in MiB
+                    else:
+                        memory_total = 1.0  # Fallback
+
                 gpus.append({
-                    "index": int(parts[0]),
+                    "index": gpu_index,
                     "name": parts[1],
                     "temperature": safe_float(parts[2]),
                     "powerDraw": safe_float(parts[3]),
                     "powerLimit": safe_float(parts[4], 999.0),  # Default high value for limit
-                    "memoryUsed": safe_float(parts[5]),
-                    "memoryTotal": safe_float(parts[6], 1.0),  # Avoid division by zero
+                    "memoryUsed": memory_used,
+                    "memoryTotal": memory_total,
                     "utilizationGpu": safe_float(parts[7]),
                 })
         return gpus

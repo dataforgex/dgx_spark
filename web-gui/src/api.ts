@@ -201,11 +201,12 @@ export const AVAILABLE_MODELS: Record<string, { name: string; port: number; mode
       'qwen3-coder-30b': { name: 'Qwen3-Coder-30B', port: 8100, modelId: 'Qwen/Qwen3-Coder-30B-A3B-Instruct', maxTokens: 2048 },
       'qwen2-vl-7b': { name: 'Qwen2-VL-7B', port: 8101, modelId: 'Qwen/Qwen2-VL-7B-Instruct', maxTokens: 2048 },
       'qwen3-235b-awq': { name: 'Qwen3-235B-AWQ', port: 8235, modelId: 'qwen3-235b-awq', maxTokens: 2048 },
+      'qwen3-vl-32b-ollama': { name: 'Qwen3-VL-32B (Ollama)', port: 11435, modelId: 'qwen3-vl:32b', maxTokens: 4096 },
     };
     return fallback[prop];
   },
   ownKeys() {
-    return ['qwen3-coder-30b-awq', 'ministral3-14b', 'qwen3-coder-30b', 'qwen2-vl-7b', 'qwen3-235b-awq'];
+    return ['qwen3-coder-30b-awq', 'ministral3-14b', 'qwen3-coder-30b', 'qwen2-vl-7b', 'qwen3-235b-awq', 'qwen3-vl-32b-ollama'];
   },
   getOwnPropertyDescriptor() {
     return { enumerable: true, configurable: true };
@@ -260,15 +261,48 @@ export class ChatAPI {
   }
 
   // Estimate token count using GPT tokenizer (good approximation for Qwen/Mistral models)
+  // Handles images separately since base64 data would give incorrect token counts
   private estimateTokens(messages: any[]): number {
+    const TOKENS_PER_IMAGE = 1000; // Vision models typically use ~1000 tokens per image
+    let imageCount = 0;
+
+    // Deep clone and strip image data for accurate text token counting
+    const messagesWithoutImages = messages.map(msg => {
+      // Handle direct image field (our internal format)
+      if (msg.image) {
+        imageCount++;
+        const { image, ...rest } = msg;
+        return rest;
+      }
+
+      // Handle OpenAI vision format (content array with image_url)
+      if (Array.isArray(msg.content)) {
+        const filteredContent = msg.content.map((part: any) => {
+          if (part.type === 'image_url') {
+            imageCount++;
+            return { type: 'image_url', image_url: { url: '[IMAGE]' } };
+          }
+          return part;
+        });
+        return { ...msg, content: filteredContent };
+      }
+
+      return msg;
+    });
+
     try {
-      const text = JSON.stringify(messages);
-      const tokens = encode(text);
-      return tokens.length;
+      const text = JSON.stringify(messagesWithoutImages);
+      const textTokens = encode(text).length;
+      const totalTokens = textTokens + (imageCount * TOKENS_PER_IMAGE);
+      if (imageCount > 0) {
+        console.log(`📊 Token estimate: ${textTokens} text + ${imageCount} image(s) × ${TOKENS_PER_IMAGE} = ${totalTokens}`);
+      }
+      return totalTokens;
     } catch {
       // Fallback to character-based estimate if tokenizer fails
-      const text = JSON.stringify(messages);
-      return Math.ceil(text.length / 3.5); // Average ~3.5 chars per token
+      const text = JSON.stringify(messagesWithoutImages);
+      const textTokens = Math.ceil(text.length / 3.5); // Average ~3.5 chars per token
+      return textTokens + (imageCount * TOKENS_PER_IMAGE);
     }
   }
 
