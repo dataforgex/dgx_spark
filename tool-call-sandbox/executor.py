@@ -1,5 +1,13 @@
 """
 Sandboxed Executor - Runs tools in isolated Docker containers
+
+Security features:
+- Seccomp profile restricts syscalls
+- Dangerous Python imports blocked
+- No network access by default
+- Read-only filesystem option
+- Non-root user execution
+- Resource limits (CPU, memory, timeout)
 """
 
 import docker
@@ -8,10 +16,88 @@ import time
 import json
 import tempfile
 import os
-from typing import Dict, Any, Optional
+import re
+from pathlib import Path
+from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
 
 from tool_loader import ToolDefinition, SandboxConfig
+
+# Path to seccomp profile
+SECCOMP_PROFILE_PATH = Path(__file__).parent / "sandbox" / "seccomp-profile.json"
+
+# Dangerous Python imports that should be blocked
+DANGEROUS_IMPORTS = [
+    "subprocess",
+    "os.system",
+    "os.popen",
+    "os.spawn",
+    "commands",
+    "pty",
+    "pexpect",
+    "paramiko",
+    "fabric",
+    "socket",  # Allow only via web_fetch tool
+    "ctypes",
+    "cffi",
+    "multiprocessing",
+    "threading",  # Allow for now, can be restricted
+    "__builtins__",
+    "builtins",
+    "importlib",
+    "pickle",  # Can execute arbitrary code
+    "marshal",
+    "shelve",
+    "tempfile",
+    "shutil.rmtree",
+    "os.remove",
+    "os.unlink",
+    "os.rmdir",
+]
+
+# Regex patterns for detecting dangerous code
+DANGEROUS_PATTERNS = [
+    r"eval\s*\(",
+    r"exec\s*\(",
+    r"compile\s*\(",
+    r"__import__\s*\(",
+    r"open\s*\([^)]*['\"][wa]",  # open() with write mode
+    r"getattr\s*\(\s*__builtins__",
+    r"globals\s*\(\s*\)",
+    r"locals\s*\(\s*\)",
+]
+
+
+def check_dangerous_code(code: str, language: str) -> Tuple[bool, str]:
+    """
+    Check if code contains dangerous patterns.
+
+    Returns:
+        Tuple of (is_safe, reason)
+    """
+    if language != "python":
+        # For bash, we rely on container isolation
+        return True, ""
+
+    # Check for dangerous imports
+    for dangerous in DANGEROUS_IMPORTS:
+        if dangerous in code:
+            # More precise check to avoid false positives
+            patterns = [
+                rf"import\s+{re.escape(dangerous)}",
+                rf"from\s+{re.escape(dangerous.split('.')[0])}\s+import",
+                rf"__import__\s*\(\s*['\"]{ re.escape(dangerous)}['\"]",
+            ]
+            for pattern in patterns:
+                if re.search(pattern, code):
+                    return False, f"Blocked import: {dangerous}"
+
+    # Check for dangerous patterns
+    for pattern in DANGEROUS_PATTERNS:
+        if re.search(pattern, code, re.IGNORECASE):
+            return False, f"Blocked pattern detected"
+
+    return True, ""
 
 
 @dataclass
@@ -238,6 +324,20 @@ except Exception as e:
         start_time = time.time()
 
         try:
+            # Check for dangerous code patterns before execution
+            if tool.name == "code_execution":
+                code = args.get("code", "")
+                language = args.get("language", "python")
+                is_safe, reason = check_dangerous_code(code, language)
+                if not is_safe:
+                    return ExecutionResult(
+                        success=False,
+                        output="",
+                        error=f"Security violation: {reason}",
+                        execution_time=0.0,
+                        exec_id=exec_id
+                    )
+
             cmd = self._build_command(tool, args)
             sandbox = tool.sandbox
 
@@ -246,6 +346,13 @@ except Exception as e:
 
             # Calculate CPU quota (percentage to Docker's 100000 period)
             cpu_quota = int(sandbox.cpu_percent * 1000)
+
+            # Build security options
+            security_opts = ["no-new-privileges"]
+
+            # Add seccomp profile if available
+            if SECCOMP_PROFILE_PATH.exists():
+                security_opts.append(f"seccomp={SECCOMP_PROFILE_PATH}")
 
             # Build container config
             container_config = {
@@ -256,9 +363,11 @@ except Exception as e:
                 "cpu_period": 100000,
                 "cpu_quota": cpu_quota,
                 "user": "1000:1000",
-                "security_opt": ["no-new-privileges"],
+                "security_opt": security_opts,
                 "stdout": True,
                 "stderr": True,
+                "cap_drop": ["ALL"],  # Drop all capabilities
+                "pids_limit": 100,     # Limit number of processes
             }
 
             # Network setting
@@ -268,6 +377,8 @@ except Exception as e:
             # Read-only filesystem
             if sandbox.read_only:
                 container_config["read_only"] = True
+                # Add tmpfs for /tmp when read-only
+                container_config["tmpfs"] = {"/tmp": "size=64m,mode=1777"}
 
             # Mount workspace if needed
             if sandbox.mount_workspace:

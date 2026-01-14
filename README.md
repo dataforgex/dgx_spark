@@ -32,6 +32,7 @@ cd vllm-qwen3-coder-30b-awq
 | Qwen2-VL-7B | vLLM | 8101 | Vision/images |
 | Ministral-3-14B | vLLM | 8103 | General chat |
 | Qwen3-Coder-30B-AWQ | vLLM | 8104 | Code + tool calling |
+| Nemotron-3-Nano-30B | vLLM | 8105 | Reasoning model |
 | Qwen3-VL-32B | Ollama | 11435 | Advanced vision |
 | **Qwen3-235B-AWQ** | vLLM | 8235 | **Distributed** (2-node) |
 
@@ -46,13 +47,14 @@ dgx_spark/
 ├── web-gui/                    # React dashboard + chat (port 5173)
 ├── model-manager/              # Model start/stop API (port 5175)
 ├── tool-call-sandbox/          # Code execution sandbox (port 5176)
-├── models.json                 # Centralized model configuration
+├── shared/                     # Shared utilities (auth, rate limiting)
+├── models.yaml                 # Centralized model configuration
 ├── vllm-qwen3-coder-30b/       # Text/code model
 ├── vllm-qwen3-coder-30b-awq/   # AWQ quantized (fastest)
 ├── vllm-qwen3-235b-awq/        # 235B distributed model (2-node)
-├── vllm-distributed-stacked-sparks/  # Shared Ray cluster scripts
 ├── vllm-qwen2-vl-7b/           # Vision model
-├── vllm-mistral3-14b/          # Mistral model
+├── vllm-ministral3-14b/        # Mistral model
+├── vllm-nemotron-3-nano-30b-bf16/  # Nemotron reasoning model
 ├── ollama-qwen3-vl-32b/        # Ollama vision model
 ├── searxng-docker/             # Local search engine
 ├── benchmarks/                 # Performance benchmarks
@@ -67,12 +69,29 @@ dgx_spark/
 - **Chat Interface**: Multi-model chat with streaming responses
 - **Web Search**: SearXNG integration for real-time information
 - **Image Support**: Upload images for vision models
+- **Token Counter**: Live token usage tracking with context warnings
+- **Startup Progress**: Visual progress bars for model loading
 
 ### Model Management
-- Centralized config in `models.json`
-- Docker-based model serving
+- Centralized config in `models.yaml`
+- Docker-based model serving with CORS support
 - Automatic container lifecycle management
-- Health checks and status monitoring
+- Health checks with startup progress tracking
+- **GPU Memory Checking**: Pre-start memory validation prevents OOM
+- Estimated memory display per model
+
+### API Security (Optional)
+Enable API authentication and rate limiting by setting environment variables:
+
+```bash
+export DGX_API_KEY="your-secret-key"  # Enable Bearer token auth
+export DGX_RATE_LIMIT=60               # Requests per minute (default: 60)
+```
+
+All services support:
+- Bearer token authentication
+- Rate limiting per client IP
+- Request logging with X-Request-ID correlation
 
 ### Tool Calling (Web Search + Code Sandbox)
 
@@ -96,6 +115,14 @@ Assistant: [executes Python code] Here are the primes: [2, 3, 5, ...]
 | `bash_command` | Run shell commands |
 | `data_storage` | Persist data across calls |
 | `file_analysis` | Analyze uploaded files |
+
+**Sandbox Security:**
+- Seccomp profile restricts dangerous syscalls
+- Dangerous Python imports blocked (subprocess, pickle, etc.)
+- Non-root execution with dropped capabilities
+- Resource limits (CPU, memory, process count)
+- Network disabled by default
+- Read-only filesystem option
 
 **Setup:**
 1. Start SearXNG: `cd searxng-docker && docker compose up -d`
@@ -127,7 +154,7 @@ curl http://localhost:8101/v1/chat/completions \
     "messages": [{
       "role": "user",
       "content": [
-        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}},
         {"type": "text", "text": "Describe this image"}
       ]
     }],
@@ -135,11 +162,19 @@ curl http://localhost:8101/v1/chat/completions \
   }'
 ```
 
+### With API Authentication
+
+```bash
+curl http://localhost:5175/api/models \
+  -H "Authorization: Bearer your-api-key"
+```
+
 ## Managing Models
 
 ### Via Dashboard (Recommended)
 1. Open http://localhost:5173
 2. Click Start/Stop buttons for each model
+3. Watch startup progress for large models
 
 ### Via Command Line
 ```bash
@@ -159,23 +194,24 @@ nvidia-smi
 ## Adding New Models
 
 1. Create folder: `vllm-{model-name}/`
-2. Add to `models.json`:
-```json
-"model-key": {
-  "name": "Display Name",
-  "engine": "vllm",
-  "port": 8105,
-  "container_name": "vllm-model-name",
-  "image": "nvcr.io/nvidia/vllm:25.09-py3",
-  "model_id": "org/model-name",
-  "settings": {
-    "max_num_seqs": 8,
-    "max_model_len": 32768,
-    "gpu_memory_utilization": 0.3
-  }
-}
+2. Add to `models.yaml`:
+```yaml
+model-key:
+  name: "Display Name"
+  description: "Model description"
+  engine: vllm
+  port: 8106
+  container_name: "vllm-model-name"
+  model_id: "org/model-name"
+  estimated_memory_gb: 30
+  settings:
+    max_model_len: 32768
+    max_num_seqs: 8
+    gpu_memory_utilization: 0.3
+    enable_auto_tool_choice: true
+    tool_call_parser: "qwen3_coder"  # or "mistral", "hermes"
 ```
-3. Create `serve.sh` (copy from existing model)
+3. Create `serve.sh` (copy from existing model, add `--allowed-origins '["*"]'` for CORS)
 4. Restart model-manager: `docker restart model-manager`
 
 ## Performance
@@ -187,7 +223,7 @@ Benchmarked on DGX Spark (GB10 Blackwell, 128GB unified memory):
 | Qwen3-Coder-30B-AWQ (vLLM) | **52** | 0.069s | ~34 GB |
 | Qwen3-30B-FP4 (TRT-LLM)* | 32 | 0.054s | ~33 GB |
 
-*TRT-LLM removed due to bugs and missing features. See [docs/TRTLLM_ISSUES.md](docs/TRTLLM_ISSUES.md).
+*TRT-LLM removed due to GB10 compatibility issues. See [docs/TRTLLM_ISSUES.md](docs/TRTLLM_ISSUES.md).
 
 ## Troubleshooting
 
@@ -208,14 +244,17 @@ docker rm -f vllm-qwen3-coder-30b-awq
 # Check GPU usage
 nvidia-smi
 
-# Reduce memory in serve.sh
-GPU_MEMORY_UTILIZATION=0.25  # Lower value
+# Dashboard shows estimated memory per model
+# Force start with ?force=true to bypass memory check
 ```
 
 ### Web Search Not Working
 1. Ensure SearXNG is running: `docker ps | grep searxng`
 2. Check search toggle is enabled in chat
 3. Use a model with tool calling support
+
+### CORS Errors
+Models need `--allowed-origins '["*"]'` in serve.sh for browser access.
 
 ## Requirements
 
@@ -233,3 +272,16 @@ GPU_MEMORY_UTILIZATION=0.25  # Lower value
 | Tool Sandbox | 5176 | Code execution sandbox |
 | SearXNG | 8080 | Local search engine |
 | Models | 8100-8235 | vLLM inference servers |
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DGX_API_KEY` | (none) | Enable API authentication |
+| `DGX_RATE_LIMIT` | 60 | Requests per minute per IP |
+| `MODELS_BASE_DIR` | (auto) | Base directory for model configs |
+| `VITE_*` | varies | Web GUI build-time configuration |
+
+## Architecture
+
+See [ARCHITECTURE_REVIEW.yaml](ARCHITECTURE_REVIEW.yaml) for detailed system design and improvement tracking.

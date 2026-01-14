@@ -8,9 +8,11 @@ and Docker container information.
 
 import json
 import os
+import sys
 import subprocess
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
@@ -19,6 +21,10 @@ from pydantic import BaseModel
 import uvicorn
 import requests
 import psutil
+
+# Add parent directory to path for shared module
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from shared.auth import add_auth_middleware
 
 # Initialize CPU percent on startup to establish baseline
 @asynccontextmanager
@@ -37,6 +43,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Authentication and rate limiting (optional, enabled via DGX_API_KEY env var)
+add_auth_middleware(app)
 
 
 def get_gpu_metrics() -> List[Dict[str, Any]]:

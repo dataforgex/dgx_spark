@@ -6,12 +6,18 @@ Includes session-based storage for persistent data across tool calls.
 """
 
 import os
+import sys
 import uuid
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+
+# Add parent directory to path for shared module
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from shared.auth import add_auth_middleware
 
 from tool_loader import get_tool_loader, ToolDefinition
 from executor import get_executor, ExecutionResult
@@ -87,6 +93,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Authentication and rate limiting (optional, enabled via DGX_API_KEY env var)
+add_auth_middleware(app, skip_paths={"/tools"})
 
 
 # --- Endpoints ---

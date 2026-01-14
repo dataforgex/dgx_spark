@@ -5,6 +5,7 @@ Model Manager API - FastAPI backend for managing LLM model containers
 
 import json
 import os
+import sys
 import subprocess
 import asyncio
 import time
@@ -13,6 +14,11 @@ import httpx
 import yaml
 import structlog
 from pathlib import Path
+
+# Add parent directory to path for shared module
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from shared.auth import add_auth_middleware, get_client_ip
+
 from typing import Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -155,6 +161,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Authentication and rate limiting (optional, enabled via DGX_API_KEY env var)
+add_auth_middleware(app, skip_paths={"/api/models", "/api/system/memory"})
 
 # Base directory for model script directories (for engine: "script" models)
 # In Docker: set via MODELS_BASE_DIR env var (mounted at /app/models)

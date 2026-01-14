@@ -1,20 +1,26 @@
+# Secure Sandbox Container for LLM Tool Execution
+# Security features:
+# - Minimal base image (python:3.11-slim)
+# - Non-root user execution
+# - No SUID/SGID binaries
+# - Minimal package installation
+# - Read-only compatible
+
 FROM python:3.11-slim
 
-# Install system tools
+# Security: Remove SUID/SGID binaries
+RUN find / -perm /6000 -type f -exec chmod a-s {} \; 2>/dev/null || true
+
+# Install minimal system tools (no network tools, no git)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
-    curl \
-    wget \
     jq \
-    git \
-    nodejs \
-    npm \
     sqlite3 \
-    imagemagick \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean \
+    && rm -rf /var/cache/apt/archives/*
 
-# Install Python packages for data science and utilities
+# Install Python packages for data science (read-only safe)
 RUN pip install --no-cache-dir \
     numpy \
     pandas \
@@ -30,17 +36,13 @@ RUN pip install --no-cache-dir \
     toml \
     httpx \
     rich \
-    tabulate
-
-# Install Node.js packages globally
-RUN npm install -g \
-    lodash \
-    axios \
-    cheerio \
-    dayjs
+    tabulate \
+    && rm -rf /root/.cache/pip
 
 # Create non-root user for security
-RUN useradd -m -u 1000 -s /bin/bash sandbox
+RUN useradd -m -u 1000 -s /bin/bash sandbox \
+    && chown -R sandbox:sandbox /home/sandbox
+
 USER sandbox
 WORKDIR /home/sandbox
 
@@ -49,7 +51,11 @@ RUN mkdir -p /home/sandbox/workspace
 
 # Set environment
 ENV PYTHONUNBUFFERED=1
-ENV NODE_PATH=/usr/lib/node_modules
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV HOME=/home/sandbox
+
+# Security: Clear potentially sensitive environment variables
+ENV HOSTNAME=""
 
 # Default to bash shell
 CMD ["/bin/bash"]
