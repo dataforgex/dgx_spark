@@ -127,6 +127,9 @@ class ModelRegistry {
 
 export const modelRegistry = new ModelRegistry();
 
+// Track which models have been logged (module-level to survive instance recreation)
+const loggedModels = new Set<string>();
+
 export interface SandboxTool {
   type: "function";
   function: {
@@ -225,12 +228,7 @@ export class ChatAPI {
     this.loadModelConfig(modelKey);
   }
 
-  private configLoaded: boolean = false;
-
   private async loadModelConfig(modelKey: string): Promise<void> {
-    // Only log once per model change
-    const shouldLog = !this.configLoaded || this.modelKey !== modelKey;
-
     const config = await modelRegistry.getModel(modelKey);
     if (config) {
       this.port = config.port;
@@ -240,9 +238,10 @@ export class ChatAPI {
       this.supportsTools = config.supportsTools;
       this.toolCallParser = config.toolCallParser;
 
-      if (shouldLog) {
+      // Only log once per model (module-level dedup survives React re-renders)
+      if (!loggedModels.has(modelKey)) {
         console.log(`🔧 Model ${modelKey}: supportsTools=${this.supportsTools}, parser=${this.toolCallParser}`);
-        this.configLoaded = true;
+        loggedModels.add(modelKey);
       }
     }
   }
