@@ -1,0 +1,166 @@
+# DGX Spark Model Configuration
+# ================================
+# Single source of truth for all model configurations.
+# This file replaces models.json and consolidates settings from serve.sh scripts.
+#
+# Usage:
+#   - model-manager reads this file to start/stop models
+#   - web-gui uses model metadata for display
+#   - serve.sh scripts can be auto-generated from this config
+#
+# Schema version for future migrations
+schema_version: "1.0"
+
+# Default settings applied to all models (can be overridden per-model)
+defaults:
+  vllm:
+    image: "nvcr.io/nvidia/vllm:25.11-py3"
+    max_num_seqs: 8
+    gpu_memory_utilization: 0.4
+    dtype: "auto"
+    swap_space: 16
+    restart_policy: "unless-stopped"
+    # Docker settings
+    gpus: "all"
+    ipc: "host"
+    ulimit_memlock: -1
+    ulimit_stack: 67108864
+  ollama:
+    image: "ollama/ollama"
+    restart_policy: "unless-stopped"
+
+# Model definitions
+models:
+  # ===========================================================================
+  # vLLM Models (managed directly by model-manager)
+  # ===========================================================================
+
+  qwen3-coder-30b-awq:
+    name: "Qwen3-Coder-30B-AWQ"
+    description: "AWQ 4-bit quantized Qwen3 Coder - best balance of speed and quality"
+    engine: vllm
+    port: 8104
+    container_name: "vllm-qwen3-coder-30b-awq"
+    model_id: "cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit"
+
+    # Resource estimates (for GPU memory checking)
+    estimated_memory_gb: 45
+
+    # vLLM settings (override defaults)
+    settings:
+      max_model_len: 65536          # 64K context
+      max_num_seqs: 8
+      gpu_memory_utilization: 0.4
+      swap_space: 16
+      # Performance features
+      enable_prefix_caching: true
+      enable_chunked_prefill: true
+      # Tool calling
+      enable_auto_tool_choice: true
+      tool_call_parser: "qwen3_coder"
+
+  qwen3-coder-30b:
+    name: "Qwen3-Coder-30B"
+    description: "Full precision Qwen3 Coder model"
+    engine: vllm
+    port: 8100
+    container_name: "vllm-qwen3-coder-30b"
+    model_id: "Qwen/Qwen3-Coder-30B-A3B-Instruct"
+    estimated_memory_gb: 65
+    settings:
+      max_model_len: 32768
+      max_num_seqs: 8
+      gpu_memory_utilization: 0.5
+
+  qwen2-vl-7b:
+    name: "Qwen2-VL-7B"
+    description: "Vision-language model for image understanding"
+    engine: vllm
+    port: 8101
+    container_name: "vllm-qwen2-vl-7b"
+    model_id: "Qwen/Qwen2-VL-7B-Instruct"
+    estimated_memory_gb: 20
+    settings:
+      max_model_len: 32768
+      max_num_seqs: 8
+      gpu_memory_utilization: 0.3
+
+  ministral3-14b:
+    name: "Ministral-3-14B"
+    description: "Mistral's efficient 14B parameter model"
+    engine: vllm
+    port: 8103
+    container_name: "vllm-mistral3-14b"
+    model_id: "mistralai/Ministral-3-14B-Instruct-2512"
+    estimated_memory_gb: 30
+    settings:
+      max_model_len: 32768
+      max_num_seqs: 8
+      gpu_memory_utilization: 0.3
+      # Mistral-specific
+      tokenizer_mode: "mistral"
+      config_format: "mistral"
+
+  # ===========================================================================
+  # Ollama Models
+  # ===========================================================================
+
+  qwen3-vl-32b-ollama:
+    name: "Qwen3-VL-32B (Ollama)"
+    description: "Advanced vision model via Ollama"
+    engine: ollama
+    port: 11435
+    container_name: "ollama-qwen3-vl-32b"
+    model_id: "qwen3-vl:32b"
+    estimated_memory_gb: 70
+    settings: {}
+
+  # ===========================================================================
+  # Script-based Models (complex startup, managed by custom scripts)
+  # ===========================================================================
+
+  qwen3-235b-awq:
+    name: "Qwen3-235B-A22B-AWQ (Distributed)"
+    description: "235B parameter model distributed across 2 DGX Sparks via Ray"
+    engine: script
+    port: 8235
+    script_dir: "vllm-qwen3-235b-awq"
+    model_id: "QuantTrio/Qwen3-235B-A22B-Instruct-2507-AWQ"
+    estimated_memory_gb: 116
+    # Script-based models store config for reference but execute via serve.sh
+    settings:
+      tensor_parallel_size: 2
+      max_model_len: 8192
+      gpu_memory_utilization: 0.75
+      swap_space: 16
+      enforce_eager: true
+      trust_remote_code: true
+      enable_auto_tool_choice: true
+      tool_call_parser: "qwen3_xml"
+
+  nemotron-3-nano-30b-bf16:
+    name: "Nemotron-3-Nano-30B-BF16"
+    description: "NVIDIA Nemotron in BF16 precision"
+    engine: script
+    port: 8105
+    script_dir: "vllm-nemotron-3-nano-30b-fp16"
+    model_id: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
+    estimated_memory_gb: 65
+    settings:
+      max_model_len: 32768
+
+  # ===========================================================================
+  # TensorRT-LLM Models (currently disabled due to GB10 compatibility issues)
+  # ===========================================================================
+
+  nemotron-3-nano-30b-fp8:
+    name: "Nemotron-3-Nano-30B-FP8"
+    description: "TRT-LLM optimized (disabled - see docs/TRTLLM_ISSUES.md)"
+    engine: trtllm
+    port: 8107
+    container_name: "trtllm-nemotron-3-nano-30b-fp8"
+    script_dir: "trtllm-nemotron-3-nano-30b-fp8"
+    model_id: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8"
+    estimated_memory_gb: 35
+    enabled: false  # Disabled due to GB10 compatibility
+    settings: {}

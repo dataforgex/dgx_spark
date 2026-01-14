@@ -9,6 +9,7 @@ import subprocess
 import asyncio
 import time
 import httpx
+import yaml
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -90,8 +91,9 @@ app.add_middleware(
 # Local: use parent directory of this script
 MODELS_BASE_DIR = Path(os.environ.get("MODELS_BASE_DIR", str(Path(__file__).parent.parent)))
 
-# Path to models.json - uses MODELS_BASE_DIR for consistency
-MODELS_CONFIG_PATH = MODELS_BASE_DIR / "models.json"
+# Config paths - prefer YAML over JSON for new format
+MODELS_YAML_PATH = MODELS_BASE_DIR / "models.yaml"
+MODELS_JSON_PATH = MODELS_BASE_DIR / "models.json"
 
 # When running in Docker, we need to use host paths for volume mounts
 # The container mounts host's ~/.cache/huggingface to /root/.cache/huggingface
@@ -116,6 +118,9 @@ class ModelStatus(BaseModel):
     memory_mb: Optional[int] = None
     # Startup progress (only present when status="starting")
     startup_progress: Optional[dict] = None  # {elapsed_seconds, timeout_seconds, progress_percent}
+    # From YAML config
+    description: Optional[str] = None
+    estimated_memory_gb: Optional[int] = None
 
 
 class SystemMemory(BaseModel):
@@ -125,13 +130,187 @@ class SystemMemory(BaseModel):
     processes: list
 
 
-def load_models_config() -> dict:
-    """Load models configuration from JSON file."""
-    if not MODELS_CONFIG_PATH.exists():
-        raise HTTPException(status_code=500, detail=f"models.json not found at {MODELS_CONFIG_PATH}")
+# Cache for loaded config
+_config_cache: dict = {"config": None, "mtime": 0}
 
-    with open(MODELS_CONFIG_PATH) as f:
-        return json.load(f)
+# Supported engine types
+SUPPORTED_ENGINES = {"vllm", "ollama", "script", "trtllm"}
+
+
+def validate_config(config: dict, config_path: Path) -> list[str]:
+    """Validate the loaded configuration.
+
+    Returns a list of warning messages (non-fatal issues).
+    Raises HTTPException for fatal errors.
+    """
+    warnings = []
+    models = config.get("models", {})
+
+    if not models:
+        raise HTTPException(
+            status_code=500,
+            detail=f"No models defined in {config_path}"
+        )
+
+    # Track ports to detect duplicates
+    ports_used = {}
+
+    for model_id, model_config in models.items():
+        # Required fields
+        required = ["port", "model_id", "engine"]
+        for field in required:
+            if field not in model_config or model_config[field] is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Model '{model_id}' missing required field: {field}"
+                )
+
+        # Validate engine type
+        engine = model_config["engine"]
+        if engine not in SUPPORTED_ENGINES:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Model '{model_id}' has invalid engine '{engine}'. Must be one of: {SUPPORTED_ENGINES}"
+            )
+
+        # Validate port
+        port = model_config["port"]
+        if not isinstance(port, int) or port < 1 or port > 65535:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Model '{model_id}' has invalid port: {port}. Must be 1-65535"
+            )
+
+        # Check for duplicate ports
+        if port in ports_used:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Duplicate port {port} used by models: '{ports_used[port]}' and '{model_id}'"
+            )
+        ports_used[port] = model_id
+
+        # Validate script_dir for script-based models
+        if engine == "script":
+            script_dir = model_config.get("script_dir")
+            if not script_dir:
+                warnings.append(f"Model '{model_id}' (engine=script) has no script_dir")
+            else:
+                script_path = MODELS_BASE_DIR / script_dir
+                if not script_path.exists():
+                    warnings.append(f"Model '{model_id}' script_dir not found: {script_path}")
+                else:
+                    serve_script = script_path / "serve.sh"
+                    if not serve_script.exists():
+                        warnings.append(f"Model '{model_id}' missing serve.sh in {script_path}")
+
+        # Warn about missing container_name for Docker-based models
+        if engine in ("vllm", "ollama") and "container_name" not in model_config:
+            warnings.append(f"Model '{model_id}' has no container_name, will use default")
+
+    return warnings
+
+
+def load_models_config() -> dict:
+    """Load models configuration from YAML or JSON file.
+
+    Prefers models.yaml (new format) over models.json (legacy).
+    Normalizes YAML format to match the internal structure.
+    """
+    global _config_cache
+
+    # Determine which config file to use
+    if MODELS_YAML_PATH.exists():
+        config_path = MODELS_YAML_PATH
+        is_yaml = True
+    elif MODELS_JSON_PATH.exists():
+        config_path = MODELS_JSON_PATH
+        is_yaml = False
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail=f"No config file found. Expected {MODELS_YAML_PATH} or {MODELS_JSON_PATH}"
+        )
+
+    # Check if we need to reload (file changed)
+    mtime = config_path.stat().st_mtime
+    if _config_cache["config"] is not None and _config_cache["mtime"] == mtime:
+        return _config_cache["config"]
+
+    # Load config
+    with open(config_path) as f:
+        if is_yaml:
+            raw_config = yaml.safe_load(f)
+            config = normalize_yaml_config(raw_config)
+        else:
+            config = json.load(f)
+
+    # Validate config (raises HTTPException on fatal errors)
+    warnings = validate_config(config, config_path)
+
+    # Log result
+    format_type = "" if is_yaml else " (legacy JSON)"
+    print(f"[config] Loaded {len(config['models'])} models from {config_path}{format_type}")
+    for warning in warnings:
+        print(f"[config] WARNING: {warning}")
+
+    _config_cache["config"] = config
+    _config_cache["mtime"] = mtime
+    return config
+
+
+def normalize_yaml_config(raw: dict) -> dict:
+    """Normalize YAML config to internal format.
+
+    YAML format has defaults and per-model settings.
+    This merges them into the format expected by the rest of the code.
+    """
+    defaults = raw.get("defaults", {})
+    models = {}
+
+    for model_id, model_config in raw.get("models", {}).items():
+        # Skip disabled models
+        if not model_config.get("enabled", True):
+            continue
+
+        engine = model_config.get("engine", "vllm")
+        engine_defaults = defaults.get(engine, {})
+
+        # Build normalized model config
+        normalized = {
+            "name": model_config.get("name", model_id),
+            "engine": engine,
+            "port": model_config.get("port"),
+            "container_name": model_config.get("container_name", f"{engine}-{model_id}"),
+            "model_id": model_config.get("model_id"),
+        }
+
+        # Add optional fields
+        if "script_dir" in model_config:
+            normalized["script_dir"] = model_config["script_dir"]
+
+        if "description" in model_config:
+            normalized["description"] = model_config["description"]
+
+        if "estimated_memory_gb" in model_config:
+            normalized["estimated_memory_gb"] = model_config["estimated_memory_gb"]
+
+        # Merge settings: defaults -> model settings
+        if engine in ("vllm", "ollama"):
+            normalized["image"] = model_config.get("image", engine_defaults.get("image"))
+
+        # Merge settings
+        model_settings = model_config.get("settings", {})
+        merged_settings = {**engine_defaults, **model_settings}
+        # Remove non-setting keys that were in defaults
+        for key in ["image", "restart_policy"]:
+            merged_settings.pop(key, None)
+
+        if merged_settings:
+            normalized["settings"] = merged_settings
+
+        models[model_id] = normalized
+
+    return {"models": models}
 
 
 async def async_run_command(cmd: list[str], timeout: float = 10.0) -> tuple[int, str, str]:
@@ -301,37 +480,75 @@ async def get_all_container_statuses() -> dict[str, str]:
 
 
 def build_vllm_command(model_id: str, model_config: dict) -> list:
-    """Build docker run command for vLLM models."""
+    """Build docker run command for vLLM models.
+
+    Supports all vLLM settings from models.yaml including:
+    - Context length, concurrency, memory utilization
+    - Swap space, dtype, KV cache settings
+    - Tool calling, prefix caching, chunked prefill
+    - Mistral-specific tokenizer settings
+    """
     settings = model_config.get("settings", {})
     port = model_config["port"]
     container_name = model_config["container_name"]
-    image = model_config["image"]
+    image = model_config.get("image", "nvcr.io/nvidia/vllm:25.11-py3")
     model = model_config["model_id"]
 
+    # Docker run command
     cmd = [
         "docker", "run", "-d",
         "--name", container_name,
-        "--gpus", "all",
+        "--gpus", settings.get("gpus", "all"),
         "--ipc=host",
-        "--ulimit", "memlock=-1",
-        "--ulimit", "stack=67108864",
+        "--ulimit", f"memlock={settings.get('ulimit_memlock', -1)}",
+        "--ulimit", f"stack={settings.get('ulimit_stack', 67108864)}",
         "-p", f"{port}:8000",
         "-v", f"{HOST_HF_CACHE_DIR}:/root/.cache/huggingface",
-        "--restart", "unless-stopped",
+        "--restart", settings.get("restart_policy", "unless-stopped"),
         image,
         "vllm", "serve", model,
-        "--max-model-len", str(settings.get("max_model_len", 32768)),
-        "--max-num-seqs", str(settings.get("max_num_seqs", 8)),
-        "--gpu-memory-utilization", str(settings.get("gpu_memory_utilization", 0.3)),
-        "--dtype", "auto",
     ]
 
+    # Core vLLM settings
+    cmd.extend(["--max-model-len", str(settings.get("max_model_len", 32768))])
+    cmd.extend(["--max-num-seqs", str(settings.get("max_num_seqs", 8))])
+    cmd.extend(["--gpu-memory-utilization", str(settings.get("gpu_memory_utilization", 0.4))])
+    cmd.extend(["--dtype", str(settings.get("dtype", "auto"))])
+
+    # Swap space for KV cache overflow
+    if "swap_space" in settings:
+        cmd.extend(["--swap-space", str(settings["swap_space"])])
+
+    # KV cache dtype
+    if "kv_cache_dtype" in settings:
+        cmd.extend(["--kv-cache-dtype", settings["kv_cache_dtype"]])
+
+    # Performance features
     if settings.get("enable_prefix_caching"):
         cmd.append("--enable-prefix-caching")
     if settings.get("enable_chunked_prefill"):
         cmd.append("--enable-chunked-prefill")
+
+    # Execution mode
+    if settings.get("enforce_eager"):
+        cmd.append("--enforce-eager")
+    if settings.get("trust_remote_code"):
+        cmd.append("--trust-remote-code")
+
+    # Tool calling
     if settings.get("enable_auto_tool_choice"):
-        cmd.extend(["--enable-auto-tool-choice", "--tool-call-parser", settings.get("tool_call_parser", "hermes")])
+        cmd.append("--enable-auto-tool-choice")
+        cmd.extend(["--tool-call-parser", settings.get("tool_call_parser", "hermes")])
+
+    # Mistral-specific settings
+    if settings.get("tokenizer_mode"):
+        cmd.extend(["--tokenizer_mode", settings["tokenizer_mode"]])
+    if settings.get("config_format"):
+        cmd.extend(["--config_format", settings["config_format"]])
+
+    # Tensor parallelism (for multi-GPU)
+    if "tensor_parallel_size" in settings and settings["tensor_parallel_size"] > 1:
+        cmd.extend(["--tensor-parallel-size", str(settings["tensor_parallel_size"])])
 
     return cmd
 
@@ -470,7 +687,9 @@ async def list_models() -> list[ModelStatus]:
                 status=status,
                 container_name=container_name,
                 memory_mb=None,  # Memory fetched separately to avoid slow docker stats
-                startup_progress=startup_info
+                startup_progress=startup_info,
+                description=model_config.get("description"),
+                estimated_memory_gb=model_config.get("estimated_memory_gb")
             ))
 
         # Check script-based models by port
@@ -506,7 +725,9 @@ async def list_models() -> list[ModelStatus]:
                 status=status,
                 container_name=model_config.get("script_dir", model_id),
                 memory_mb=None,
-                startup_progress=startup_info
+                startup_progress=startup_info,
+                description=model_config.get("description"),
+                estimated_memory_gb=model_config.get("estimated_memory_gb")
             ))
 
         # Fetch memory for running containers in parallel (if any)
