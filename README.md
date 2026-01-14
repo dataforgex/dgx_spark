@@ -1,5 +1,8 @@
 # DGX Spark - Multi-Model LLM Serving
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Website](https://img.shields.io/badge/Website-acloudpartner.dk-green)](https://www.acloudpartner.dk)
+
 Local LLM infrastructure for DGX Spark (GB10 Blackwell) with vLLM, web UI, and model management. Works with 1 or 2 DGX Sparks.
 
 ## Quick Start
