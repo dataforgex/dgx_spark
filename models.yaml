@@ -71,6 +71,9 @@ models:
       max_model_len: 32768
       max_num_seqs: 8
       gpu_memory_utilization: 0.5
+      # Tool calling
+      enable_auto_tool_choice: true
+      tool_call_parser: "qwen3_coder"
 
   qwen2-vl-7b:
     name: "Qwen2-VL-7B"
@@ -84,6 +87,9 @@ models:
       max_model_len: 32768
       max_num_seqs: 8
       gpu_memory_utilization: 0.3
+      # Tool calling (hermes format for Qwen2-VL)
+      enable_auto_tool_choice: true
+      tool_call_parser: "hermes"
 
   ministral3-14b:
     name: "Ministral-3-14B"
@@ -100,6 +106,9 @@ models:
       # Mistral-specific
       tokenizer_mode: "mistral"
       config_format: "mistral"
+      # Tool calling
+      enable_auto_tool_choice: true
+      tool_call_parser: "mistral"
 
   # ===========================================================================
   # Ollama Models
@@ -148,6 +157,9 @@ models:
     estimated_memory_gb: 65
     settings:
       max_model_len: 32768
+      # Tool calling
+      enable_auto_tool_choice: true
+      tool_call_parser: "qwen3_coder"
 
   # ===========================================================================
   # TensorRT-LLM Models (currently disabled due to GB10 compatibility issues)

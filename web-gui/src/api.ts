@@ -2,12 +2,125 @@ import type { ChatRequest, ModelInfo, SearchResult } from './types';
 import { getApiHost, SERVICES } from './config';
 import { encode } from 'gpt-tokenizer';
 
+// Model config from model-manager API
 export interface ModelConfig {
+  id: string;
   name: string;
   port: number;
   modelId: string;
   maxTokens: number;
+  maxContextLength: number;
+  supportsTools: boolean;
+  toolCallParser: string | null;
+  status?: string;
 }
+
+// Model registry - fetches from API and caches
+class ModelRegistry {
+  private models: Map<string, ModelConfig> = new Map();
+  private lastFetch: number = 0;
+  private fetchPromise: Promise<void> | null = null;
+  private readonly CACHE_TTL = 30000; // 30 seconds
+
+  async getModel(modelKey: string): Promise<ModelConfig | null> {
+    await this.ensureFresh();
+    return this.models.get(modelKey) || null;
+  }
+
+  async getAllModels(): Promise<ModelConfig[]> {
+    await this.ensureFresh();
+    return Array.from(this.models.values());
+  }
+
+  private async ensureFresh(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastFetch < this.CACHE_TTL && this.models.size > 0) {
+      return;
+    }
+
+    // Prevent multiple concurrent fetches
+    if (this.fetchPromise) {
+      return this.fetchPromise;
+    }
+
+    this.fetchPromise = this.fetchModels();
+    try {
+      await this.fetchPromise;
+    } finally {
+      this.fetchPromise = null;
+    }
+  }
+
+  private async fetchModels(): Promise<void> {
+    try {
+      const response = await fetch(`${SERVICES.MODEL_MANAGER}/api/models`);
+      if (!response.ok) {
+        console.warn('Failed to fetch models from API, using fallback');
+        this.loadFallbackModels();
+        return;
+      }
+
+      const data = await response.json();
+      this.models.clear();
+
+      for (const model of data) {
+        this.models.set(model.id, {
+          id: model.id,
+          name: model.name,
+          port: model.port,
+          modelId: model.model_id || model.id,
+          maxTokens: 2048, // Default, model doesn't expose this
+          maxContextLength: model.max_context_length || 32768,
+          supportsTools: model.supports_tools || false,
+          toolCallParser: model.tool_call_parser || null,
+          status: model.status,
+        });
+      }
+
+      this.lastFetch = Date.now();
+      console.log(`📋 Loaded ${this.models.size} models from API`);
+    } catch (error) {
+      console.warn('Error fetching models:', error);
+      this.loadFallbackModels();
+    }
+  }
+
+  private loadFallbackModels(): void {
+    // Fallback for when API is unavailable
+    const fallback: Record<string, Omit<ModelConfig, 'id'>> = {
+      'qwen3-coder-30b-awq': {
+        name: 'Qwen3-Coder-30B-AWQ',
+        port: 8104,
+        modelId: 'cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit',
+        maxTokens: 2048,
+        maxContextLength: 65536,
+        supportsTools: true,
+        toolCallParser: 'qwen3_coder',
+      },
+      'ministral3-14b': {
+        name: 'Ministral-3-14B',
+        port: 8103,
+        modelId: 'mistralai/Ministral-3-14B-Instruct-2512',
+        maxTokens: 2048,
+        maxContextLength: 32768,
+        supportsTools: true,
+        toolCallParser: 'mistral',
+      },
+    };
+
+    this.models.clear();
+    for (const [id, config] of Object.entries(fallback)) {
+      this.models.set(id, { id, ...config });
+    }
+    this.lastFetch = Date.now();
+  }
+
+  invalidate(): void {
+    this.lastFetch = 0;
+  }
+}
+
+export const modelRegistry = new ModelRegistry();
 
 export interface SandboxTool {
   type: "function";
@@ -57,64 +170,67 @@ const SEARCH_TOOL = {
   }
 };
 
-export const AVAILABLE_MODELS: Record<string, ModelConfig> = {
-  'qwen3-coder-30b': {
-    name: 'Qwen3-Coder-30B',
-    port: 8100,
-    modelId: 'Qwen/Qwen3-Coder-30B-A3B-Instruct',
-    maxTokens: 2048,
+// AVAILABLE_MODELS is now fetched from model-manager API via modelRegistry
+// This export provides synchronous fallback for backward compatibility
+export const AVAILABLE_MODELS: Record<string, { name: string; port: number; modelId: string; maxTokens: number }> = new Proxy({} as any, {
+  get(_target, prop: string) {
+    const fallback: Record<string, any> = {
+      'qwen3-coder-30b-awq': { name: 'Qwen3-Coder-30B-AWQ', port: 8104, modelId: 'cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit', maxTokens: 2048 },
+      'ministral3-14b': { name: 'Ministral-3-14B', port: 8103, modelId: 'mistralai/Ministral-3-14B-Instruct-2512', maxTokens: 2048 },
+      'qwen3-coder-30b': { name: 'Qwen3-Coder-30B', port: 8100, modelId: 'Qwen/Qwen3-Coder-30B-A3B-Instruct', maxTokens: 2048 },
+      'qwen2-vl-7b': { name: 'Qwen2-VL-7B', port: 8101, modelId: 'Qwen/Qwen2-VL-7B-Instruct', maxTokens: 2048 },
+      'qwen3-235b-awq': { name: 'Qwen3-235B-AWQ', port: 8235, modelId: 'qwen3-235b-awq', maxTokens: 2048 },
+    };
+    return fallback[prop];
   },
-  'qwen2-vl-7b': {
-    name: 'Qwen2-VL-7B',
-    port: 8101,
-    modelId: 'Qwen/Qwen2-VL-7B-Instruct',
-    maxTokens: 2048,
+  ownKeys() {
+    return ['qwen3-coder-30b-awq', 'ministral3-14b', 'qwen3-coder-30b', 'qwen2-vl-7b', 'qwen3-235b-awq'];
   },
-  'ministral3-14b': {
-    name: 'Ministral-3-14B',
-    port: 8103,
-    modelId: 'mistralai/Ministral-3-14B-Instruct-2512',
-    maxTokens: 2048,
+  getOwnPropertyDescriptor() {
+    return { enumerable: true, configurable: true };
   },
-  'qwen3-vl-32b-ollama': {
-    name: 'Qwen3-VL-32B (Ollama)',
-    port: 11435,
-    modelId: 'qwen3-vl:32b',
-    maxTokens: 2048,
-  },
-  'qwen3-coder-30b-awq': {
-    name: 'Qwen3-Coder-30B-AWQ (vLLM)',
-    port: 8104,
-    modelId: 'cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit',
-    maxTokens: 2048,
-  },
-  'qwen3-235b-awq': {
-    name: 'Qwen3-235B-AWQ (Distributed)',
-    port: 8235,
-    modelId: 'qwen3-235b-awq',
-    maxTokens: 2048,
-  },
-};
+});
 
 export class ChatAPI {
   private port: number;
   private model: string;
+  private modelKey: string;
   private maxTokens: number;
   private temperature: number;
   private sandboxTools: SandboxTool[] = [];
   private sessionId: string;
   private maxContextLength: number = 32768; // Default, updated by fetchModelInfo
+  private supportsTools: boolean = true; // Assume true until we know otherwise
+  private toolCallParser: string | null = null;
 
   constructor(
-    modelKey: string = 'qwen3-coder-30b',
+    modelKey: string = 'qwen3-coder-30b-awq',
     temperature: number = 0.7
   ) {
-    const config = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS['qwen3-coder-30b'];
-    this.port = config.port;
-    this.model = config.modelId;
-    this.maxTokens = config.maxTokens;
+    // Use synchronous fallback for immediate init, then async update
+    const fallback = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS['qwen3-coder-30b-awq'];
+    this.modelKey = modelKey;
+    this.port = fallback?.port || 8104;
+    this.model = fallback?.modelId || modelKey;
+    this.maxTokens = fallback?.maxTokens || 2048;
     this.temperature = temperature;
     this.sessionId = crypto.randomUUID();
+
+    // Async load full config from registry
+    this.loadModelConfig(modelKey);
+  }
+
+  private async loadModelConfig(modelKey: string): Promise<void> {
+    const config = await modelRegistry.getModel(modelKey);
+    if (config) {
+      this.port = config.port;
+      this.model = config.modelId;
+      this.maxTokens = config.maxTokens;
+      this.maxContextLength = config.maxContextLength;
+      this.supportsTools = config.supportsTools;
+      this.toolCallParser = config.toolCallParser;
+      console.log(`🔧 Model ${modelKey}: supportsTools=${this.supportsTools}, parser=${this.toolCallParser}`);
+    }
   }
 
   // Estimate token count using GPT tokenizer (good approximation for Qwen/Mistral models)
@@ -258,12 +374,21 @@ export class ChatAPI {
   }
 
   setModel(modelKey: string) {
-    const config = AVAILABLE_MODELS[modelKey];
-    if (config) {
-      this.port = config.port;
-      this.model = config.modelId;
-      this.maxTokens = config.maxTokens;
+    this.modelKey = modelKey;
+    // Synchronous fallback
+    const fallback = AVAILABLE_MODELS[modelKey];
+    if (fallback) {
+      this.port = fallback.port;
+      this.model = fallback.modelId;
+      this.maxTokens = fallback.maxTokens;
     }
+    // Async update with full config
+    this.loadModelConfig(modelKey);
+  }
+
+  // Check if current model supports tool calling
+  getSupportsTools(): boolean {
+    return this.supportsTools;
   }
 
   // Get context usage info for UI display
@@ -367,14 +492,19 @@ export class ChatAPI {
     return this.sandboxTools.some(t => t.function.name === toolName);
   }
 
-  // Parse <tool_call> tags from model content (Qwen3 format)
+  // Parse <tool_call> tags from model content (legacy fallback)
+  // NOTE: This should rarely be needed if vLLM's tool_call_parser is configured correctly.
+  // If you see "WARN: Falling back to content parsing" frequently, check the model's
+  // tool_call_parser setting in models.yaml
   private parseToolCallsFromContent(content: string): any[] {
     const toolCalls: any[] = [];
-    const regex = /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g;
+
+    // Try Qwen3 XML format: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+    const qwenRegex = /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g;
     let match;
     let index = 0;
 
-    while ((match = regex.exec(content)) !== null) {
+    while ((match = qwenRegex.exec(content)) !== null) {
       try {
         const parsed = JSON.parse(match[1]);
         if (parsed.name && parsed.arguments) {
@@ -391,11 +521,29 @@ export class ChatAPI {
           index++;
         }
       } catch (e) {
-        console.warn('Failed to parse tool call:', match[1], e);
+        console.warn('Failed to parse tool call from content:', match[1], e);
       }
     }
 
+    if (toolCalls.length > 0) {
+      console.warn(`⚠️ WARN: Falling back to content parsing for ${toolCalls.length} tool call(s). ` +
+        `This indicates vLLM's tool_call_parser may not be working correctly for model ${this.modelKey}`);
+    }
+
     return toolCalls;
+  }
+
+  // Safely parse tool call arguments (handles both string and object)
+  private parseToolArguments(args: string | object): Record<string, any> {
+    if (typeof args === 'object') {
+      return args as Record<string, any>;
+    }
+    try {
+      return JSON.parse(args);
+    } catch (e) {
+      console.error('Failed to parse tool arguments:', args, e);
+      return {};
+    }
   }
 
   // Execute a single tool by name and return structured result
@@ -567,14 +715,30 @@ export class ChatAPI {
       iteration++;
       console.log(`🔄 Tool call iteration ${iteration}: ${toolCalls.length} tool(s) requested`);
 
-      // Execute ALL tool calls in parallel
-      const toolResults = await Promise.all(
-        toolCalls.map(async (toolCall: any) => {
-          const toolName = toolCall.function.name;
-          const args = JSON.parse(toolCall.function.arguments);
-          return this.executeToolByName(toolCall.id, toolName, args);
-        })
-      );
+      // Execute ALL tool calls in parallel with error handling
+      const toolResults: ToolExecutionResult[] = [];
+      try {
+        const results = await Promise.all(
+          toolCalls.map(async (toolCall: any) => {
+            try {
+              const toolName = toolCall.function.name;
+              const args = this.parseToolArguments(toolCall.function.arguments);
+              return await this.executeToolByName(toolCall.id, toolName, args);
+            } catch (toolError) {
+              console.error(`Error executing tool ${toolCall.function?.name}:`, toolError);
+              return {
+                toolCallId: toolCall.id || `error_${Date.now()}`,
+                toolName: toolCall.function?.name || 'unknown',
+                content: JSON.stringify({ error: `Tool execution failed: ${toolError}` }),
+              };
+            }
+          })
+        );
+        toolResults.push(...results);
+      } catch (allError) {
+        console.error('Critical error in tool execution:', allError);
+        break; // Exit loop on critical error
+      }
 
       // Aggregate results from all tools
       for (const result of toolResults) {

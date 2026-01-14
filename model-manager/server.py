@@ -191,6 +191,11 @@ class ModelStatus(BaseModel):
     # From YAML config
     description: Optional[str] = None
     estimated_memory_gb: Optional[int] = None
+    model_id: Optional[str] = None  # HuggingFace model ID
+    max_context_length: Optional[int] = None  # Max context tokens
+    # Tool support
+    supports_tools: bool = False
+    tool_call_parser: Optional[str] = None  # qwen3_coder, mistral, hermes, etc.
 
 
 class SystemMemory(BaseModel):
@@ -507,6 +512,15 @@ def normalize_yaml_config(raw: dict) -> dict:
 
         if merged_settings:
             normalized["settings"] = merged_settings
+
+        # Extract tool support info from settings
+        if merged_settings.get("enable_auto_tool_choice"):
+            normalized["supports_tools"] = True
+            normalized["tool_call_parser"] = merged_settings.get("tool_call_parser")
+
+        # Extract max context length
+        if "max_model_len" in merged_settings:
+            normalized["max_context_length"] = merged_settings["max_model_len"]
 
         models[model_id] = normalized
 
@@ -905,7 +919,11 @@ async def list_models() -> list[ModelStatus]:
                 memory_mb=None,  # Memory fetched separately to avoid slow docker stats
                 startup_progress=startup_info,
                 description=model_config.get("description"),
-                estimated_memory_gb=model_config.get("estimated_memory_gb")
+                estimated_memory_gb=model_config.get("estimated_memory_gb"),
+                model_id=model_config.get("model_id"),
+                max_context_length=model_config.get("max_context_length"),
+                supports_tools=model_config.get("supports_tools", False),
+                tool_call_parser=model_config.get("tool_call_parser")
             ))
 
         # Check script-based models by port
@@ -943,7 +961,11 @@ async def list_models() -> list[ModelStatus]:
                 memory_mb=None,
                 startup_progress=startup_info,
                 description=model_config.get("description"),
-                estimated_memory_gb=model_config.get("estimated_memory_gb")
+                estimated_memory_gb=model_config.get("estimated_memory_gb"),
+                model_id=model_config.get("model_id"),
+                max_context_length=model_config.get("max_context_length"),
+                supports_tools=model_config.get("supports_tools", False),
+                tool_call_parser=model_config.get("tool_call_parser")
             ))
 
         # Fetch memory for running containers in parallel (if any)
@@ -984,7 +1006,13 @@ async def get_model(model_id: str) -> ModelStatus:
         port=model_config["port"],
         status=status,
         container_name=container_name,
-        memory_mb=memory
+        memory_mb=memory,
+        description=model_config.get("description"),
+        estimated_memory_gb=model_config.get("estimated_memory_gb"),
+        model_id=model_config.get("model_id"),
+        max_context_length=model_config.get("max_context_length"),
+        supports_tools=model_config.get("supports_tools", False),
+        tool_call_parser=model_config.get("tool_call_parser")
     )
 
 
