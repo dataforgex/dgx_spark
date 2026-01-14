@@ -213,17 +213,6 @@ model-key:
 3. Create `serve.sh` (copy from existing model, add `--allowed-origins '["*"]'` for CORS)
 4. Restart model-manager: `docker restart model-manager`
 
-## Performance
-
-Benchmarked on DGX Spark (GB10 Blackwell, 128GB unified memory):
-
-| Model | TPS | TTFT | Memory |
-|-------|-----|------|--------|
-| Qwen3-Coder-30B-AWQ (vLLM) | **52** | 0.069s | ~34 GB |
-| Qwen3-30B-FP4 (TRT-LLM)* | 32 | 0.054s | ~33 GB |
-
-*TRT-LLM removed due to GB10 compatibility issues. See [docs/TRTLLM_ISSUES.md](docs/TRTLLM_ISSUES.md).
-
 ## Requirements
 
 - **Hardware**: DGX Spark or NVIDIA GPU with 64+ GB VRAM
