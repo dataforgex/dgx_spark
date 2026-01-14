@@ -34,3 +34,4 @@ ENV/
 *.njsproj
 *.sln
 *.sw?
+error_screen/

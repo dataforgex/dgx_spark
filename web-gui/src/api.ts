@@ -725,19 +725,45 @@ export class ChatAPI {
       payload.tool_choice = "auto";
     }
 
-    // Call model server directly (CORS enabled on vLLM, nginx wrapper on TRT-LLM)
-    const modelUrl = `http://${getApiHost()}:${this.port}/v1/chat/completions`;
-    let response = await fetch(modelUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(1800000),
-    });
+    // For Ollama models (ports 114xx), use proxy to avoid browser CORS issues
+    // For other models (vLLM, TRT-LLM), call directly
+    const isOllamaPort = this.port >= 11434 && this.port <= 11499;
+    const modelUrl = isOllamaPort
+      ? `${SERVICES.METRICS_API}/api/chat/proxy/${this.port}`
+      : `http://${getApiHost()}:${this.port}/v1/chat/completions`;
+
+    const bodyStr = JSON.stringify(payload);
+    console.log(`🌐 Fetching: ${modelUrl} (body: ${(bodyStr.length / 1024).toFixed(1)}KB)${isOllamaPort ? ' [via proxy]' : ''}`);
+
+    let response: Response;
+    try {
+      response = await fetch(modelUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: bodyStr,
+        signal: AbortSignal.timeout(1800000),
+      });
+    } catch (fetchError: any) {
+      // Log detailed error info for debugging
+      console.error('🔴 Fetch failed:', {
+        url: modelUrl,
+        error: fetchError.message,
+        name: fetchError.name,
+        bodySize: bodyStr.length,
+      });
+      throw fetchError;
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('🔴 API returned error:', {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText.slice(0, 500),
+        headers: Object.fromEntries(response.headers.entries()),
+      });
       throw new Error(`API error: ${response.status} - ${errorText}`);
     }
 

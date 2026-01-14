@@ -366,6 +366,29 @@ def fetch_page_summary(url: str) -> Optional[str]:
         return None
 
 
+@app.post("/api/chat/proxy/{port}")
+async def proxy_chat(port: int, request: dict):
+    """Proxy chat requests to model servers to avoid browser CORS issues"""
+    target_url = f"http://127.0.0.1:{port}/v1/chat/completions"
+
+    try:
+        print(f"🔀 Proxying chat request to port {port} (payload size: {len(json.dumps(request))} bytes)")
+        response = requests.post(
+            target_url,
+            json=request,
+            headers={"Content-Type": "application/json"},
+            timeout=300.0
+        )
+        print(f"🔀 Proxy response: {response.status_code}")
+        return response.json()
+    except requests.Timeout:
+        print(f"🔀 Proxy timeout to port {port}")
+        raise HTTPException(status_code=504, detail="Request to model server timed out")
+    except Exception as e:
+        print(f"🔀 Proxy error: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 if __name__ == "__main__":
     print("Starting DGX Spark Metrics API on http://localhost:5174")
     print("Endpoints:")
@@ -373,5 +396,6 @@ if __name__ == "__main__":
     print("  - GET /api/models      - Model server status")
     print("  - GET /api/containers  - Docker container status")
     print("  - POST /api/search     - Web search (SearXNG)")
+    print("  - POST /api/chat/proxy/{port} - Proxy chat to model")
     print("  - GET /health          - Health check")
     uvicorn.run(app, host="0.0.0.0", port=5174)
