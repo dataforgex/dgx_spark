@@ -40,8 +40,11 @@ class ChatErrorBoundary extends Component<{ children: ReactNode }, { hasError: b
   }
 }
 
-const getSystemMessage = (hasSearch: boolean, hasSandbox: boolean) => {
+const getSystemMessage = (hasSearch: boolean, hasSandbox: boolean, hasVision: boolean = false) => {
   let msg = 'You are a helpful AI assistant.';
+  if (hasVision) {
+    msg += ' You have vision capabilities and CAN see and analyze images that users share with you. When a user sends an image, describe what you actually see in the image directly - do not claim you cannot see images.';
+  }
   if (hasSearch) {
     msg += ' You have access to a web_search tool. Only use it when the user explicitly asks for current news, weather, prices, or real-time information that you cannot answer from your training data.';
   }
@@ -239,7 +242,7 @@ function ChatInner() {
       image: image
     };
 
-    const systemMessage = getSystemMessage(enableSearch, enableSandbox && sandboxAvailable);
+    const systemMessage = getSystemMessage(enableSearch, enableSandbox && sandboxAvailable, selectedModel.toLowerCase().includes('vl'));
 
     if (!activeChatId || !conversations[activeChatId]) {
       // Create new conversation
@@ -366,7 +369,7 @@ function ChatInner() {
     }
   };
 
-  const defaultSystemMessage = getSystemMessage(enableSearch, enableSandbox && sandboxAvailable);
+  const defaultSystemMessage = getSystemMessage(enableSearch, enableSandbox && sandboxAvailable, selectedModel.toLowerCase().includes('vl'));
   const messages = currentChat ? currentChat.messages : [{ role: 'system' as const, content: defaultSystemMessage }];
 
   // Filter out system message for display if desired, or keep it.
