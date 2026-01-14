@@ -1,6 +1,6 @@
 # DGX Spark - Multi-Model LLM Serving
 
-Local LLM infrastructure for DGX Spark (GB10 Blackwell) with vLLM, web UI, and model management.
+Local LLM infrastructure for DGX Spark (GB10 Blackwell) with vLLM, web UI, and model management. Works with 1 or 2 DGX Sparks.
 
 ## Quick Start
 
