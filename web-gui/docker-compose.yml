@@ -2,8 +2,8 @@ services:
   web-gui:
     image: dgx-spark-web-gui:latest
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: web-gui/Dockerfile
       args:
         # Build-time args for Vite (frontend)
         - VITE_METRICS_API_PORT=${VITE_METRICS_API_PORT:-5174}

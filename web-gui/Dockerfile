@@ -17,13 +17,13 @@ ENV VITE_SANDBOX_PORT=$VITE_SANDBOX_PORT
 ENV VITE_SEARXNG_PORT=$VITE_SEARXNG_PORT
 
 # Copy package files
-COPY package*.json ./
+COPY web-gui/package*.json ./
 
 # Install dependencies
 RUN npm ci
 
 # Copy source code
-COPY . .
+COPY web-gui/ .
 
 # Build the frontend (Vite will embed VITE_* env vars)
 RUN npm run build
@@ -50,11 +50,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python requirements and install dependencies
-COPY requirements.txt .
+COPY web-gui/requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
+# Copy the shared module
+COPY shared/ /app/shared/
+
 # Copy the Python API
-COPY metrics-api.py .
+COPY web-gui/metrics-api.py .
 
 # Copy the built frontend from the builder stage
 COPY --from=frontend-builder /app/dist /app/dist
