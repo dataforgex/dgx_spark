@@ -52,6 +52,8 @@ IMAGE_EXISTS=$(docker images -q dgx-spark-web-gui 2>/dev/null)
 # Stop and remove existing container if running
 echo "🛑 Stopping existing container (if any)..."
 $DOCKER_COMPOSE down 2>/dev/null || true
+# Also remove any orphan container with same name (not started via compose)
+docker rm -f dgx-spark-web-gui 2>/dev/null || true
 echo ""
 
 # Build only if image doesn't exist or --build/--rebuild flag is passed
