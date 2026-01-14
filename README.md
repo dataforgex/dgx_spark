@@ -57,7 +57,6 @@ dgx_spark/
 ├── vllm-nemotron-3-nano-30b-bf16/  # Nemotron reasoning model
 ├── ollama-qwen3-vl-32b/        # Ollama vision model
 ├── searxng-docker/             # Local search engine
-├── benchmarks/                 # Performance benchmarks
 └── docs/                       # Documentation
 ```
 
@@ -284,4 +283,8 @@ Models need `--allowed-origins '["*"]'` in serve.sh for browser access.
 
 ## Architecture
 
-See [ARCHITECTURE_REVIEW.yaml](ARCHITECTURE_REVIEW.yaml) for detailed system design and improvement tracking.
+Key components:
+- **Web GUI**: React + Vite frontend with real-time GPU monitoring
+- **Model Manager**: FastAPI backend managing Docker containers
+- **Tool Sandbox**: Isolated code execution with seccomp + capabilities
+- **vLLM**: High-performance inference with OpenAI-compatible API
