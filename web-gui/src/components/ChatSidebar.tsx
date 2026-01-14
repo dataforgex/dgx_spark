@@ -6,16 +6,23 @@ interface ChatSidebarProps {
     currentChatId: string | null;
     onNewChat: () => void;
     onDeleteChat: (id: string, e: React.MouseEvent) => void;
+    onSelectChat?: () => void;
+    isOpen?: boolean;
 }
 
-export function ChatSidebar({ conversations, currentChatId, onNewChat, onDeleteChat }: ChatSidebarProps) {
+export function ChatSidebar({ conversations, currentChatId, onNewChat, onDeleteChat, onSelectChat, isOpen }: ChatSidebarProps) {
     const navigate = useNavigate();
 
     // Sort conversations by timestamp (newest first)
     const sortedConversations = [...conversations].sort((a, b) => b.timestamp - a.timestamp);
 
+    const handleSelectChat = (id: string) => {
+        navigate(`/chat/${id}`);
+        onSelectChat?.();
+    };
+
     return (
-        <div className="chat-sidebar">
+        <div className={`chat-sidebar ${isOpen ? 'open' : ''}`}>
             <button className="new-chat-button" onClick={onNewChat}>
                 <span>+</span> New Chat
             </button>
@@ -25,7 +32,7 @@ export function ChatSidebar({ conversations, currentChatId, onNewChat, onDeleteC
                     <div
                         key={conv.id}
                         className={`conversation-item ${conv.id === currentChatId ? 'active' : ''}`}
-                        onClick={() => navigate(`/chat/${conv.id}`)}
+                        onClick={() => handleSelectChat(conv.id)}
                     >
                         <div className="conversation-title">{conv.title}</div>
                         <button

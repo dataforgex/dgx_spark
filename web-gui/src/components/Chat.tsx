@@ -65,6 +65,7 @@ export function Chat() {
   const [runningModels, setRunningModels] = useState<Set<string>>(new Set());
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [contextInfo, setContextInfo] = useState<{ tokens: number; maxContext: number; percentUsed: number } | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef(new ChatAPI(selectedModel));
 
@@ -288,15 +289,24 @@ export function Chat() {
 
   return (
     <div className="chat-layout">
+      <div
+        className={`sidebar-overlay ${sidebarOpen ? 'open' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+      />
       <ChatSidebar
         conversations={Object.values(conversations)}
         currentChatId={chatId || null}
-        onNewChat={handleNewChat}
+        onNewChat={() => { handleNewChat(); setSidebarOpen(false); }}
         onDeleteChat={handleDeleteChat}
+        onSelectChat={() => setSidebarOpen(false)}
+        isOpen={sidebarOpen}
       />
 
       <div className="chat-main">
         <div className="chat-header">
+          <button className="menu-button" onClick={() => setSidebarOpen(true)}>
+            ☰
+          </button>
           <div className="chat-title">
             {currentChat ? currentChat.title : 'New Chat'}
           </div>
