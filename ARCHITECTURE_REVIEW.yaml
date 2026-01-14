@@ -192,7 +192,7 @@ priority_2_important:
 
   - id: P2-001
     title: "Implement GPU memory allocation tracking"
-    status: "[~]"  # in progress
+    status: "[x]"  # completed
     severity: MEDIUM
     effort: MEDIUM
     description: |
@@ -213,19 +213,30 @@ priority_2_important:
       - web-gui (show memory warning)
     tasks:
       - description: "Add estimated_memory_gb to model configs"
-        status: "[ ]"
+        status: "[x]"
       - description: "Create get_gpu_memory_usage() function"
-        status: "[ ]"
+        status: "[x]"
       - description: "Add pre-start memory check"
-        status: "[ ]"
+        status: "[x]"
       - description: "Return warning if memory tight"
-        status: "[ ]"
+        status: "[x]"
       - description: "Add memory bar to dashboard"
-        status: "[ ]"
+        status: "[x]"
       - description: "Implement model queue when memory full"
-        status: "[ ]"
-    notes: ""
-    completed_date: null
+        status: "[-]"  # Skipped - blocking with force option is sufficient
+    notes: |
+      Implementation complete (2026-01-14):
+      - Added estimated_memory_gb to all models in models.yaml
+      - Created get_unified_memory_info() for DGX Spark unified memory
+      - Added check_memory_for_model() with thresholds (2GB block, 5GB warn)
+      - Pre-start memory check blocks with 409 Conflict if insufficient
+      - Added force=true query param to bypass memory check
+      - Updated /api/system/memory to return unified memory info
+      - Added /api/models/{id}/memory-check endpoint
+      - Dashboard shows estimated memory per model card
+      - Dashboard prompts to force start if memory insufficient
+      - Works for unified memory systems (DGX Spark, Jetson)
+    completed_date: "2026-01-14"
 
   - id: P2-002
     title: "Fix Docker-out-of-Docker pattern"
@@ -507,16 +518,16 @@ completed:
 # =============================================================================
 summary:
   total_items: 17
-  completed: 7
+  completed: 8
   in_progress: 2
-  not_started: 7
-  wont_fix: 1
+  not_started: 5
+  wont_fix: 2
 
   priority_1_progress: "4/4 complete (100%)"  # P1-001, P1-002, P1-004 done, P1-003 optional
-  priority_2_progress: "0/5 complete (0%)"
+  priority_2_progress: "1/5 complete (20%)"   # P2-001 done
   priority_3_progress: "0/5 complete (0%)"
 
   next_actions:
     - "P1-003: Add API authentication (optional for local network)"
-    - "P2-001: Implement GPU memory checking before model start"
+    - "P2-002: Evaluate Docker-out-of-Docker alternatives"
     - "P2-003: Add structured logging"

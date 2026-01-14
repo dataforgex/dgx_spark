@@ -27,6 +27,10 @@ HEALTH_CHECK_INTERVAL = 5  # seconds between checks
 DEFAULT_STARTUP_TIMEOUT = 600  # 10 minutes default
 LARGE_MODEL_TIMEOUT = 900  # 15 minutes for 100B+ models
 
+# Memory check configuration
+MEMORY_WARNING_THRESHOLD_GB = 5  # Warn if less than 5GB headroom
+MEMORY_BLOCK_THRESHOLD_GB = 2   # Block if less than 2GB would remain
+
 
 async def health_check_loop():
     """Background task that polls health of starting models."""
@@ -128,6 +132,136 @@ class SystemMemory(BaseModel):
     used_mb: int
     free_mb: int
     processes: list
+
+
+class UnifiedMemoryInfo(BaseModel):
+    """Memory info for unified memory systems (DGX Spark, Jetson).
+
+    On unified memory systems, CPU and GPU share the same memory pool.
+    We track system memory as the total pool and GPU process memory separately.
+    """
+    total_gb: float
+    available_gb: float
+    used_gb: float
+    gpu_used_gb: float  # Memory used by GPU processes specifically
+    gpu_processes: list  # List of GPU processes with memory usage
+
+
+class MemoryCheckResult(BaseModel):
+    """Result of pre-start memory check."""
+    can_start: bool
+    available_gb: float
+    required_gb: float
+    remaining_gb: float
+    warning: Optional[str] = None
+    error: Optional[str] = None
+
+
+async def get_unified_memory_info() -> UnifiedMemoryInfo:
+    """Get memory info for unified memory systems (DGX Spark).
+
+    Reads system memory from /proc/meminfo and GPU process memory from nvidia-smi.
+    This approach works for systems where CPU and GPU share the same memory pool.
+    """
+    # Read system memory from /proc/meminfo
+    total_kb = 0
+    available_kb = 0
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    total_kb = int(line.split()[1])
+                elif line.startswith("MemAvailable:"):
+                    available_kb = int(line.split()[1])
+    except Exception as e:
+        print(f"[memory] Error reading /proc/meminfo: {e}")
+
+    total_gb = total_kb / 1024 / 1024
+    available_gb = available_kb / 1024 / 1024
+    used_gb = total_gb - available_gb
+
+    # Get GPU process memory from nvidia-smi
+    gpu_processes = []
+    gpu_used_mb = 0
+    try:
+        returncode, stdout, _ = await async_run_command(
+            ["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory",
+             "--format=csv,noheader,nounits"],
+            timeout=5.0
+        )
+        if returncode == 0 and stdout.strip():
+            for line in stdout.strip().split("\n"):
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) >= 3:
+                    try:
+                        mem_mb = int(parts[2]) if parts[2].isdigit() else 0
+                        gpu_processes.append({
+                            "pid": parts[0],
+                            "name": parts[1],
+                            "memory_mb": mem_mb
+                        })
+                        gpu_used_mb += mem_mb
+                    except (ValueError, IndexError):
+                        continue
+    except Exception as e:
+        print(f"[memory] Error querying nvidia-smi: {e}")
+
+    return UnifiedMemoryInfo(
+        total_gb=round(total_gb, 1),
+        available_gb=round(available_gb, 1),
+        used_gb=round(used_gb, 1),
+        gpu_used_gb=round(gpu_used_mb / 1024, 1),
+        gpu_processes=gpu_processes
+    )
+
+
+async def check_memory_for_model(model_config: dict) -> MemoryCheckResult:
+    """Check if there's enough memory to start a model.
+
+    Returns a MemoryCheckResult indicating whether the model can start,
+    along with any warnings or errors.
+    """
+    estimated_gb = model_config.get("estimated_memory_gb")
+    if not estimated_gb:
+        # No estimate, allow with warning
+        return MemoryCheckResult(
+            can_start=True,
+            available_gb=0,
+            required_gb=0,
+            remaining_gb=0,
+            warning="No memory estimate for this model, proceeding without check"
+        )
+
+    memory_info = await get_unified_memory_info()
+    available_gb = memory_info.available_gb
+    remaining_gb = available_gb - estimated_gb
+
+    # Check thresholds
+    if remaining_gb < MEMORY_BLOCK_THRESHOLD_GB:
+        return MemoryCheckResult(
+            can_start=False,
+            available_gb=available_gb,
+            required_gb=estimated_gb,
+            remaining_gb=remaining_gb,
+            error=f"Insufficient memory: {available_gb:.1f}GB available, "
+                  f"model needs ~{estimated_gb}GB, would leave only {remaining_gb:.1f}GB"
+        )
+    elif remaining_gb < MEMORY_WARNING_THRESHOLD_GB:
+        return MemoryCheckResult(
+            can_start=True,
+            available_gb=available_gb,
+            required_gb=estimated_gb,
+            remaining_gb=remaining_gb,
+            warning=f"Low memory: {available_gb:.1f}GB available, "
+                    f"model needs ~{estimated_gb}GB, will leave {remaining_gb:.1f}GB"
+        )
+    else:
+        return MemoryCheckResult(
+            can_start=True,
+            available_gb=available_gb,
+            required_gb=estimated_gb,
+            remaining_gb=remaining_gb
+        )
 
 
 # Cache for loaded config
@@ -780,8 +914,13 @@ def invalidate_cache():
 
 
 @app.post("/api/models/{model_id}/start")
-async def start_model(model_id: str) -> dict:
-    """Start a model container."""
+async def start_model(model_id: str, force: bool = False) -> dict:
+    """Start a model container.
+
+    Args:
+        model_id: The model to start
+        force: If True, skip memory check and start anyway
+    """
     config = load_models_config()
 
     if model_id not in config["models"]:
@@ -789,6 +928,19 @@ async def start_model(model_id: str) -> dict:
 
     model_config = config["models"][model_id]
     engine = model_config["engine"]
+
+    # Check memory availability before starting (unless forced)
+    memory_check = await check_memory_for_model(model_config)
+    if not force and not memory_check.can_start:
+        raise HTTPException(
+            status_code=409,  # Conflict - resource constraint
+            detail={
+                "error": memory_check.error,
+                "available_gb": memory_check.available_gb,
+                "required_gb": memory_check.required_gb,
+                "hint": "Use force=true to start anyway"
+            }
+        )
 
     # Invalidate cache since we're changing state
     invalidate_cache()
@@ -825,12 +977,15 @@ async def start_model(model_id: str) -> dict:
             # Register for health monitoring
             await register_starting_model(model_id, port, startup_timeout)
 
-            return {
+            response = {
                 "message": f"Model {model_id} starting (health checks every {HEALTH_CHECK_INTERVAL}s)",
                 "status": "starting",
                 "port": port,
                 "timeout_seconds": startup_timeout
             }
+            if memory_check.warning:
+                response["memory_warning"] = memory_check.warning
+            return response
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -876,12 +1031,15 @@ async def start_model(model_id: str) -> dict:
         port = model_config["port"]
         await register_starting_model(model_id, port, startup_timeout)
 
-        return {
+        response = {
             "message": f"Model {model_id} starting (health checks every {HEALTH_CHECK_INTERVAL}s)",
             "status": "starting",
             "container_id": stdout.strip()[:12] if stdout else "",
             "timeout_seconds": startup_timeout
         }
+        if memory_check.warning:
+            response["memory_warning"] = memory_check.warning
+        return response
     except asyncio.TimeoutError:
         raise HTTPException(status_code=500, detail="Command timed out")
     except Exception as e:
@@ -1013,58 +1171,66 @@ async def get_model_logs(model_id: str, lines: int = 100) -> dict:
 
 
 @app.get("/api/system/memory")
-async def get_system_memory() -> SystemMemory:
-    """Get GPU memory usage (async)."""
+async def get_system_memory() -> dict:
+    """Get memory usage for unified memory systems (DGX Spark).
+
+    Returns both unified memory info and GPU process memory.
+    For systems with discrete GPUs, this falls back to nvidia-smi queries.
+    """
     try:
-        # Run both nvidia-smi commands in parallel
-        mem_task = async_run_command(
+        # Get unified memory info (works for DGX Spark)
+        unified = await get_unified_memory_info()
+
+        # Try nvidia-smi query for discrete GPU memory (may return N/A on unified systems)
+        mem_returncode, mem_stdout, _ = await async_run_command(
             ["nvidia-smi", "--query-gpu=memory.total,memory.used,memory.free",
              "--format=csv,noheader,nounits"]
         )
-        proc_task = async_run_command(
-            ["nvidia-smi", "--query-compute-apps=pid,name,used_memory",
-             "--format=csv,noheader,nounits"]
-        )
 
-        (mem_returncode, mem_stdout, _), (proc_returncode, proc_stdout, _) = await asyncio.gather(
-            mem_task, proc_task
-        )
-
-        total, used, free = 0, 0, 0
-        if mem_returncode == 0:
+        discrete_gpu_memory = None
+        if mem_returncode == 0 and "[N/A]" not in mem_stdout:
             parts = mem_stdout.strip().split(",")
             try:
-                total = int(parts[0].strip())
-                used = int(parts[1].strip())
-                free = int(parts[2].strip())
+                discrete_gpu_memory = {
+                    "total_mb": int(parts[0].strip()),
+                    "used_mb": int(parts[1].strip()),
+                    "free_mb": int(parts[2].strip())
+                }
             except (ValueError, IndexError):
                 pass
 
-        processes = []
-        if proc_returncode == 0 and proc_stdout.strip():
-            for line in proc_stdout.strip().split("\n"):
-                parts = line.split(",")
-                if len(parts) >= 3:
-                    try:
-                        mem = parts[2].strip()
-                        # Handle N/A or other non-numeric values
-                        mem_val = int(mem) if mem.isdigit() else 0
-                        processes.append({
-                            "pid": parts[0].strip(),
-                            "name": parts[1].strip(),
-                            "memory_mb": mem_val
-                        })
-                    except (ValueError, IndexError):
-                        continue
-
-        return SystemMemory(
-            total_mb=total,
-            used_mb=used,
-            free_mb=free,
-            processes=processes
-        )
+        return {
+            # Unified memory (system-wide, works on DGX Spark)
+            "unified": {
+                "total_gb": unified.total_gb,
+                "available_gb": unified.available_gb,
+                "used_gb": unified.used_gb,
+                "gpu_used_gb": unified.gpu_used_gb
+            },
+            # GPU processes
+            "gpu_processes": unified.gpu_processes,
+            # Discrete GPU memory (None on unified memory systems)
+            "discrete_gpu": discrete_gpu_memory,
+            # Is this a unified memory system?
+            "is_unified": discrete_gpu_memory is None
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/models/{model_id}/memory-check")
+async def check_model_memory(model_id: str) -> MemoryCheckResult:
+    """Check if there's enough memory to start a model.
+
+    Returns memory check result with can_start flag and any warnings/errors.
+    """
+    config = load_models_config()
+
+    if model_id not in config["models"]:
+        raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+
+    model_config = config["models"][model_id]
+    return await check_memory_for_model(model_config)
 
 
 @app.get("/api/health")

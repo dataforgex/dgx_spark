@@ -71,6 +71,8 @@ interface ManagedModel {
   container_name: string
   memory_mb: number | null
   startup_progress: StartupProgress | null
+  description?: string
+  estimated_memory_gb?: number
 }
 
 export function Dashboard() {
@@ -159,15 +161,31 @@ export function Dashboard() {
     return () => clearInterval(interval)
   }, [API_BASE, MODEL_MANAGER_API])
 
-  const handleStartModel = async (modelId: string) => {
+  const handleStartModel = async (modelId: string, force: boolean = false) => {
     setModelActions(prev => ({ ...prev, [modelId]: true }))
     try {
-      const response = await fetch(`${MODEL_MANAGER_API}/api/models/${modelId}/start`, {
-        method: 'POST'
-      })
+      const url = force
+        ? `${MODEL_MANAGER_API}/api/models/${modelId}/start?force=true`
+        : `${MODEL_MANAGER_API}/api/models/${modelId}/start`
+      const response = await fetch(url, { method: 'POST' })
+
       if (!response.ok) {
         const error = await response.json()
-        alert(`Failed to start model: ${error.detail}`)
+
+        // Handle memory check failure (409 Conflict)
+        if (response.status === 409 && error.detail?.available_gb !== undefined) {
+          const { available_gb, required_gb, error: errorMsg } = error.detail
+          const shouldForce = window.confirm(
+            `${errorMsg}\n\nAvailable: ${available_gb.toFixed(1)} GB\nRequired: ${required_gb} GB\n\nDo you want to start anyway? This may cause out-of-memory errors.`
+          )
+          if (shouldForce) {
+            setModelActions(prev => ({ ...prev, [modelId]: false }))
+            return handleStartModel(modelId, true)
+          }
+        } else {
+          const message = typeof error.detail === 'string' ? error.detail : JSON.stringify(error.detail)
+          alert(`Failed to start model: ${message}`)
+        }
       }
     } catch (err) {
       alert(`Failed to start model: ${err}`)
@@ -510,9 +528,15 @@ export function Dashboard() {
                       <span>Port:</span>
                       <span>{model.port}</span>
                     </div>
+                    {model.estimated_memory_gb && (
+                      <div className="detail-row">
+                        <span>Est. Memory:</span>
+                        <span>{model.estimated_memory_gb} GB</span>
+                      </div>
+                    )}
                     {model.memory_mb && (
                       <div className="detail-row">
-                        <span>Memory:</span>
+                        <span>Actual:</span>
                         <span>{model.memory_mb >= 1024 ? `${(model.memory_mb / 1024).toFixed(1)} GB` : `${model.memory_mb} MB`}</span>
                       </div>
                     )}
