@@ -352,7 +352,9 @@ except Exception as e:
 
             # Add seccomp profile if available
             if SECCOMP_PROFILE_PATH.exists():
-                security_opts.append(f"seccomp={SECCOMP_PROFILE_PATH}")
+                with open(SECCOMP_PROFILE_PATH) as f:
+                    seccomp_json = f.read()
+                security_opts.append(f"seccomp={seccomp_json}")
 
             # Build container config
             container_config = {
@@ -368,6 +370,10 @@ except Exception as e:
                 "stderr": True,
                 "cap_drop": ["ALL"],  # Drop all capabilities
                 "pids_limit": 100,     # Limit number of processes
+                "environment": {
+                    "MPLCONFIGDIR": "/tmp",  # Matplotlib config dir (writable)
+                    "HOME": "/tmp",  # Some libs need writable HOME
+                },
             }
 
             # Network setting
