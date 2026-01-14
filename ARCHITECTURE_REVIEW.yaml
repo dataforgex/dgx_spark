@@ -1,0 +1,492 @@
+# DGX Spark Architecture Review Checklist
+# Generated: 2026-01-14
+#
+# Status values: [ ] not started, [~] in progress, [x] completed, [-] won't fix
+#
+# Usage: Update status as you work through items
+#        Track blockers in 'notes' field
+#        Add completion date when done
+
+project: dgx_spark
+review_date: "2026-01-14"
+reviewer: "Claude Opus 4.5 + Dan"
+
+# =============================================================================
+# PRIORITY 1: CRITICAL (Do First)
+# =============================================================================
+priority_1_critical:
+
+  - id: P1-001
+    title: "Add model startup health checks"
+    status: "[~]"  # in progress
+    severity: HIGH
+    effort: MEDIUM
+    description: |
+      Models are marked "running" immediately after docker run, before they're
+      actually ready to serve requests. Need to poll /health endpoint.
+    current_behavior: |
+      - model-manager/server.py starts container with docker run -d
+      - Returns "running" status immediately
+      - Model may take 30s-5min to actually load
+    expected_behavior: |
+      - Start container
+      - Poll /health or /v1/models endpoint
+      - Only return "running" when health check passes
+      - Return "starting" with progress indication during load
+    files_to_modify:
+      - model-manager/server.py  # start_model(), get_model_status()
+    tasks:
+      - description: "Add health check polling after container start"
+        status: "[ ]"
+      - description: "Add 'starting' status with timeout tracking"
+        status: "[ ]"
+      - description: "Add startup progress endpoint (model loading %)"
+        status: "[ ]"
+      - description: "Handle startup timeout (default 10min for large models)"
+        status: "[ ]"
+      - description: "Update web-gui to show loading progress"
+        status: "[ ]"
+    notes: ""
+    completed_date: null
+
+  - id: P1-002
+    title: "Consolidate configs into single source"
+    status: "[~]"  # in progress
+    severity: HIGH
+    effort: HIGH
+    description: |
+      Configuration is split between models.json, serve.sh scripts, and
+      docker-compose files. This causes drift and maintenance burden.
+    current_behavior: |
+      - models.json: port, container_name, basic settings
+      - vllm-*/serve.sh: actual runtime config (context, memory, flags)
+      - docker-compose: environment variables, volumes
+      - Values often don't match between sources
+    expected_behavior: |
+      - Single models.yaml with complete config per model
+      - serve.sh scripts auto-generated or read from config
+      - docker-compose uses config values via env substitution
+    files_to_modify:
+      - models.json → models.yaml (migrate)
+      - model-manager/server.py (read new format)
+      - vllm-*/serve.sh (generate or template)
+    tasks:
+      - description: "Design unified config schema (YAML)"
+        status: "[ ]"
+      - description: "Migrate models.json to models.yaml"
+        status: "[ ]"
+      - description: "Update model-manager to read new format"
+        status: "[ ]"
+      - description: "Create serve.sh template generator"
+        status: "[ ]"
+      - description: "Add config validation on startup"
+        status: "[ ]"
+      - description: "Update documentation"
+        status: "[ ]"
+    notes: ""
+    completed_date: null
+
+  - id: P1-003
+    title: "Add API authentication"
+    status: "[ ]"
+    severity: HIGH
+    effort: MEDIUM
+    description: |
+      All APIs currently have no authentication. Any local network client
+      can start/stop models, execute code, search web.
+    current_behavior: |
+      - CORS allows all origins (allow_origins=["*"])
+      - No API keys or tokens required
+      - No rate limiting
+    expected_behavior: |
+      - Optional API key authentication (env var to enable)
+      - Rate limiting per client IP
+      - Audit logging of all API calls
+    files_to_modify:
+      - model-manager/server.py
+      - tool-call-sandbox/server.py
+      - web-gui/metrics-api.py
+    tasks:
+      - description: "Add optional API_KEY environment variable"
+        status: "[ ]"
+      - description: "Implement Bearer token middleware"
+        status: "[ ]"
+      - description: "Add rate limiting (slowapi or similar)"
+        status: "[ ]"
+      - description: "Restrict CORS to specific origins"
+        status: "[ ]"
+      - description: "Add request logging with client IP"
+        status: "[ ]"
+    notes: "Can skip if only used on trusted local network"
+    completed_date: null
+
+  - id: P1-004
+    title: "Fix hardcoded ports/URLs in code"
+    status: "[~]"  # in progress
+    severity: MEDIUM
+    effort: LOW
+    description: |
+      Ports and URLs are hardcoded throughout the codebase, making deployment
+      to different environments difficult.
+    current_behavior: |
+      - web-gui/src/api.ts: SANDBOX_API_PORT = 5176
+      - web-gui/src/api.ts: MODEL_MANAGER_API port 5175
+      - AVAILABLE_MODELS has hardcoded ports per model
+      - docker-compose: SEARXNG_URL hardcoded IP
+    expected_behavior: |
+      - All ports/URLs from environment variables
+      - Defaults for development, overridable for production
+      - Single config file for all service URLs
+    files_to_modify:
+      - web-gui/src/api.ts
+      - web-gui/src/components/Chat.tsx
+      - web-gui/docker-compose.yml
+    tasks:
+      - description: "Create services.json or use env vars for URLs"
+        status: "[ ]"
+      - description: "Update api.ts to read from config/env"
+        status: "[ ]"
+      - description: "Update Chat.tsx MODEL_MANAGER_API"
+        status: "[ ]"
+      - description: "Fix docker-compose SEARXNG_URL"
+        status: "[ ]"
+      - description: "Document environment variables"
+        status: "[ ]"
+    notes: ""
+    completed_date: null
+
+# =============================================================================
+# PRIORITY 2: IMPORTANT (Medium Term)
+# =============================================================================
+priority_2_important:
+
+  - id: P2-001
+    title: "Implement GPU memory allocation tracking"
+    status: "[~]"  # in progress
+    severity: MEDIUM
+    effort: MEDIUM
+    description: |
+      No tracking of GPU memory usage when starting models. Users can
+      accidentally start multiple large models causing OOM.
+    current_behavior: |
+      - Models started with --gpus all
+      - No check if enough VRAM available
+      - OOM discovered only after startup fails
+    expected_behavior: |
+      - Track estimated VRAM per model in config
+      - Query nvidia-smi for current usage before start
+      - Warn or block if insufficient memory
+      - Show memory usage in dashboard
+    files_to_modify:
+      - models.json/yaml (add estimated_memory field)
+      - model-manager/server.py (add memory check)
+      - web-gui (show memory warning)
+    tasks:
+      - description: "Add estimated_memory_gb to model configs"
+        status: "[ ]"
+      - description: "Create get_gpu_memory_usage() function"
+        status: "[ ]"
+      - description: "Add pre-start memory check"
+        status: "[ ]"
+      - description: "Return warning if memory tight"
+        status: "[ ]"
+      - description: "Add memory bar to dashboard"
+        status: "[ ]"
+      - description: "Implement model queue when memory full"
+        status: "[ ]"
+    notes: ""
+    completed_date: null
+
+  - id: P2-002
+    title: "Fix Docker-out-of-Docker pattern"
+    status: "[~]"  # in progress
+    severity: MEDIUM
+    effort: HIGH
+    description: |
+      Model-manager runs in Docker but controls host Docker daemon via
+      mounted socket. This is a security risk and reliability concern.
+    current_behavior: |
+      - model-manager container mounts /var/run/docker.sock
+      - Can spawn unlimited containers on host
+      - No resource limits enforced
+      - Container crash affects host Docker
+    expected_behavior: |
+      Option A: Run model-manager on host (not in Docker)
+      Option B: Use Docker API over TCP with TLS
+      Option C: Use container orchestrator (k8s, docker swarm)
+    files_to_modify:
+      - model-manager/Dockerfile
+      - web-gui/docker-compose.yml
+      - model-manager/server.py (if using Docker API)
+    tasks:
+      - description: "Evaluate options (host vs API vs orchestrator)"
+        status: "[ ]"
+      - description: "Document chosen approach"
+        status: "[ ]"
+      - description: "Implement solution"
+        status: "[ ]"
+      - description: "Add resource limits for spawned containers"
+        status: "[ ]"
+      - description: "Test failure scenarios"
+        status: "[ ]"
+    notes: |
+      Option A (run on host) is simplest for single-node setup.
+      Option C (k8s) better for multi-node production.
+    completed_date: null
+
+  - id: P2-003
+    title: "Add structured logging and tracing"
+    status: "[ ]"
+    severity: MEDIUM
+    effort: MEDIUM
+    description: |
+      Logs are unstructured stdout/docker logs. No request tracing
+      across services. Hard to debug issues.
+    current_behavior: |
+      - print() statements and basic logging
+      - No request IDs
+      - No correlation between services
+      - Logs lost on container restart
+    expected_behavior: |
+      - Structured JSON logging
+      - Request ID propagated through all services
+      - Log aggregation (optional: ELK, Loki)
+      - OpenTelemetry tracing (optional)
+    files_to_modify:
+      - model-manager/server.py
+      - tool-call-sandbox/server.py
+      - web-gui/metrics-api.py
+    tasks:
+      - description: "Add structlog or python-json-logger"
+        status: "[ ]"
+      - description: "Add X-Request-ID header propagation"
+        status: "[ ]"
+      - description: "Add request logging middleware"
+        status: "[ ]"
+      - description: "Add error logging with stack traces"
+        status: "[ ]"
+      - description: "(Optional) Add OpenTelemetry"
+        status: "[ ]"
+    notes: ""
+    completed_date: null
+
+  - id: P2-004
+    title: "Harden sandbox security"
+    status: "[ ]"
+    severity: MEDIUM
+    effort: MEDIUM
+    description: |
+      Tool sandbox executes arbitrary code with only Docker isolation.
+      No seccomp profiles, minimal base image, or code analysis.
+    current_behavior: |
+      - Sandbox container runs arbitrary Python/Bash
+      - Basic resource limits (256MB RAM, 0.5 CPU)
+      - No network by default
+      - No syscall filtering
+    expected_behavior: |
+      - Minimal base image (distroless or alpine)
+      - Seccomp profile blocking dangerous syscalls
+      - AppArmor/SELinux profile
+      - AST analysis to block dangerous imports (optional)
+    files_to_modify:
+      - tool-call-sandbox/sandbox/Dockerfile
+      - tool-call-sandbox/executor.py
+      - (new) tool-call-sandbox/seccomp-profile.json
+    tasks:
+      - description: "Create minimal sandbox base image"
+        status: "[ ]"
+      - description: "Add seccomp profile"
+        status: "[ ]"
+      - description: "Add AppArmor profile (if applicable)"
+        status: "[ ]"
+      - description: "Block dangerous Python imports"
+        status: "[ ]"
+      - description: "Add sandbox escape tests"
+        status: "[ ]"
+    notes: ""
+    completed_date: null
+
+  - id: P2-005
+    title: "Improve token estimation accuracy"
+    status: "[ ]"
+    severity: MEDIUM
+    effort: LOW
+    description: |
+      Token estimation uses chars/1.8 which is inaccurate. Causes
+      context overflow errors or overly aggressive compression.
+    current_behavior: |
+      - estimateTokens() uses text.length / 1.8
+      - Off by up to 40% in some cases
+      - Causes 400 errors from vLLM
+    expected_behavior: |
+      - Use proper tokenizer (tiktoken or model-specific)
+      - Pre-validate context before sending
+      - Show token count in UI
+    files_to_modify:
+      - web-gui/src/api.ts
+      - web-gui/package.json (add tokenizer dep)
+    tasks:
+      - description: "Add js-tiktoken or gpt-tokenizer package"
+        status: "[ ]"
+      - description: "Update estimateTokens() to use tokenizer"
+        status: "[ ]"
+      - description: "Add token count display in chat UI"
+        status: "[ ]"
+      - description: "Pre-check context before API call"
+        status: "[ ]"
+    notes: "May need different tokenizer per model family"
+    completed_date: null
+
+# =============================================================================
+# PRIORITY 3: NICE TO HAVE (Long Term)
+# =============================================================================
+priority_3_nice_to_have:
+
+  - id: P3-001
+    title: "Add auto-scaling and load balancing"
+    status: "[ ]"
+    severity: LOW
+    effort: HIGH
+    description: |
+      Single vLLM server per model with no replication or auto-scaling.
+      Can't handle traffic spikes.
+    tasks:
+      - description: "Evaluate Ray Serve vs custom load balancer"
+        status: "[ ]"
+      - description: "Implement model replica management"
+        status: "[ ]"
+      - description: "Add request queue with backpressure"
+        status: "[ ]"
+    notes: "Only needed for production/multi-user"
+    completed_date: null
+
+  - id: P3-002
+    title: "Add persistent storage backend"
+    status: "[ ]"
+    severity: LOW
+    effort: MEDIUM
+    description: |
+      Tool sandbox uses local filesystem for session storage.
+      Lost on container restart, not shared across replicas.
+    tasks:
+      - description: "Add Redis/PostgreSQL storage option"
+        status: "[ ]"
+      - description: "Add TTL and garbage collection"
+        status: "[ ]"
+      - description: "Add storage usage metrics"
+        status: "[ ]"
+    notes: ""
+    completed_date: null
+
+  - id: P3-003
+    title: "Add multi-tenant support"
+    status: "[ ]"
+    severity: LOW
+    effort: HIGH
+    description: |
+      No user isolation. All users share same models, storage, quotas.
+    tasks:
+      - description: "Add user/tenant concept"
+        status: "[ ]"
+      - description: "Per-user rate limits and quotas"
+        status: "[ ]"
+      - description: "Isolated sandbox sessions"
+        status: "[ ]"
+      - description: "Usage tracking and billing hooks"
+        status: "[ ]"
+    notes: "Only needed for SaaS deployment"
+    completed_date: null
+
+  - id: P3-004
+    title: "Add model signature verification"
+    status: "[ ]"
+    severity: LOW
+    effort: MEDIUM
+    description: |
+      HuggingFace cache is mounted directly. Compromised host could
+      poison model weights.
+    tasks:
+      - description: "Verify model checksums on load"
+        status: "[ ]"
+      - description: "Add model provenance tracking"
+        status: "[ ]"
+      - description: "Alert on unexpected model changes"
+        status: "[ ]"
+    notes: ""
+    completed_date: null
+
+  - id: P3-005
+    title: "Replace Docker sandbox with gVisor/Firecracker"
+    status: "[ ]"
+    severity: LOW
+    effort: HIGH
+    description: |
+      Docker provides process isolation but shared kernel. gVisor or
+      Firecracker provide stronger isolation.
+    tasks:
+      - description: "Evaluate gVisor vs Firecracker"
+        status: "[ ]"
+      - description: "Create sandbox runtime integration"
+        status: "[ ]"
+      - description: "Benchmark performance impact"
+        status: "[ ]"
+    notes: "May not be needed for trusted users"
+    completed_date: null
+
+# =============================================================================
+# COMPLETED ITEMS
+# =============================================================================
+completed:
+
+  - id: C-001
+    title: "Add Qwen3 tool call parsing"
+    status: "[x]"
+    completed_date: "2026-01-14"
+    description: "Parse <tool_call> XML tags from Qwen3 model output"
+    files_modified:
+      - web-gui/src/api.ts
+
+  - id: C-002
+    title: "Fix model-manager port detection"
+    status: "[x]"
+    completed_date: "2026-01-14"
+    description: "Use socket instead of ss command for port checks"
+    files_modified:
+      - model-manager/server.py
+
+  - id: C-003
+    title: "Fix models.json path in Docker"
+    status: "[x]"
+    completed_date: "2026-01-14"
+    description: "Use MODELS_BASE_DIR for consistent path resolution"
+    files_modified:
+      - model-manager/server.py
+
+  - id: C-004
+    title: "Add distributed Qwen3-235B-AWQ"
+    status: "[x]"
+    completed_date: "2026-01-14"
+    description: "Multi-node Ray cluster for 235B model"
+    files_modified:
+      - vllm-qwen3-235b-awq/ (new)
+      - vllm-distributed-stacked-sparks/ (new)
+      - models.json
+
+# =============================================================================
+# PROGRESS SUMMARY
+# =============================================================================
+summary:
+  total_items: 17
+  completed: 4
+  in_progress: 5
+  not_started: 8
+  wont_fix: 0
+
+  priority_1_progress: "1/4 complete (25%)"
+  priority_2_progress: "0/5 complete (0%)"
+  priority_3_progress: "0/5 complete (0%)"
+
+  next_actions:
+    - "P1-001: Implement health check polling in model-manager"
+    - "P1-004: Extract hardcoded ports to environment variables"
+    - "P2-001: Add estimated_memory to model configs"
