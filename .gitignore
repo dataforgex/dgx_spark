@@ -1,5 +1,6 @@
 # Claude Code local settings
 .claude/
+ARCHITECTURE_REVIEW.yaml
 
 # Node modules
 node_modules/
