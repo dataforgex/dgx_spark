@@ -96,7 +96,8 @@ DOCKER_CMD="docker run -d \
   --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION} \
   --kv-cache-dtype ${KV_CACHE_DTYPE} \
   --dtype ${DTYPE} \
-  --swap-space ${SWAP_SPACE}"
+  --swap-space ${SWAP_SPACE} \
+  --allowed-origins '[\"*\"]'"
 
 # Add optional features
 if [ "$ENABLE_PREFIX_CACHING" = true ]; then

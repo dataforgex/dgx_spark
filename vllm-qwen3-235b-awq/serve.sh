@@ -70,6 +70,7 @@ docker exec -d "$CONTAINER" /bin/bash -c "vllm serve $MODEL \
     --disable-log-requests \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_xml \
+    --allowed-origins '[\"*\"]' \
     --port $PORT \
     2>&1 | tee /tmp/vllm_serve.log"
 

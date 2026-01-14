@@ -52,5 +52,6 @@ exec vllm serve "${MODEL_NAME}" \
   --enforce-eager \
   --enable-auto-tool-choice \
   --tool-call-parser qwen3_coder \
+  --allowed-origins '["*"]' \
   --reasoning-parser-plugin "${SCRIPT_DIR}/nano_v3_reasoning_parser.py" \
   --reasoning-parser nano_v3
