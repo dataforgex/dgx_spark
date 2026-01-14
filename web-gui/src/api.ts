@@ -1,4 +1,5 @@
 import type { ChatRequest, ModelInfo, SearchResult } from './types';
+import { getApiHost, SERVICES } from './config';
 
 export interface ModelConfig {
   name: string;
@@ -36,14 +37,6 @@ interface ToolExecutionResult {
   searchResults?: SearchResult[];
   sandboxOutput?: string;
 }
-
-// Use 127.0.0.1 for localhost to avoid IPv6 resolution issues
-const getApiHost = () => {
-  const hostname = window.location.hostname;
-  return hostname === 'localhost' ? '127.0.0.1' : hostname;
-};
-
-const SANDBOX_API_PORT = 5176;
 
 const SEARCH_TOOL = {
   type: "function",
@@ -290,8 +283,7 @@ export class ChatAPI {
   }
 
   private async performWebSearch(query: string): Promise<SearchResult[]> {
-    const apiBase = `http://${getApiHost()}:5174`;
-    const response = await fetch(`${apiBase}/api/search`, {
+    const response = await fetch(`${SERVICES.METRICS_API}/api/search`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -310,8 +302,7 @@ export class ChatAPI {
 
   async fetchSandboxTools(): Promise<SandboxTool[]> {
     try {
-      const sandboxUrl = `http://${getApiHost()}:${SANDBOX_API_PORT}/api/tools-openai`;
-      const response = await fetch(sandboxUrl, {
+      const response = await fetch(`${SERVICES.SANDBOX}/api/tools-openai`, {
         signal: AbortSignal.timeout(5000),
       });
 
@@ -330,8 +321,7 @@ export class ChatAPI {
   }
 
   private async executeSandboxTool(toolName: string, args: Record<string, unknown>): Promise<SandboxExecuteResult> {
-    const sandboxUrl = `http://${getApiHost()}:${SANDBOX_API_PORT}/api/execute/${toolName}`;
-    const response = await fetch(sandboxUrl, {
+    const response = await fetch(`${SERVICES.SANDBOX}/api/execute/${toolName}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

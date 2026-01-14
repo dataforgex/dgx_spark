@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChatAPI, AVAILABLE_MODELS } from '../api';
+import { SERVICES } from '../config';
 import type { Message, Conversation } from '../types';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
@@ -21,12 +22,8 @@ const getSystemMessage = (hasSearch: boolean, hasSandbox: boolean) => {
   return msg;
 };
 
-// Use 127.0.0.1 for localhost to avoid IPv6 resolution issues
-const getModelManagerHost = () => {
-  const hostname = window.location.hostname;
-  return hostname === 'localhost' ? '127.0.0.1' : hostname;
-};
-const MODEL_MANAGER_API = `http://${getModelManagerHost()}:5175`;
+// Use centralized service URL from config
+const MODEL_MANAGER_API = SERVICES.MODEL_MANAGER;
 
 interface ManagedModel {
   id: string;

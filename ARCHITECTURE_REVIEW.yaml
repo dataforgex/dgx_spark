@@ -18,7 +18,7 @@ priority_1_critical:
 
   - id: P1-001
     title: "Add model startup health checks"
-    status: "[~]"  # in progress
+    status: "[x]"  # completed
     severity: HIGH
     effort: MEDIUM
     description: |
@@ -37,17 +37,29 @@ priority_1_critical:
       - model-manager/server.py  # start_model(), get_model_status()
     tasks:
       - description: "Add health check polling after container start"
-        status: "[ ]"
+        status: "[x]"
       - description: "Add 'starting' status with timeout tracking"
-        status: "[ ]"
+        status: "[x]"
       - description: "Add startup progress endpoint (model loading %)"
-        status: "[ ]"
+        status: "[x]"
       - description: "Handle startup timeout (default 10min for large models)"
-        status: "[ ]"
+        status: "[x]"
       - description: "Update web-gui to show loading progress"
-        status: "[ ]"
-    notes: ""
-    completed_date: null
+        status: "[x]"
+    notes: |
+      Implementation complete (2026-01-14):
+      Backend:
+      - Background health check loop polls /health, /v1/models, /api/tags
+      - 'starting' status with startup_progress tracking
+      - /api/models/{id}/health endpoint returns health + progress
+      - Timeout: 600s default, 900s for 100B+ models
+      Frontend:
+      - Progress bar with animated glow effect
+      - Shows elapsed time / timeout (e.g., "1:30 / 10:00")
+      - Shows health check count
+      - Cancel button to abort startup
+      - Pulsing border animation for starting cards
+    completed_date: "2026-01-14"
 
   - id: P1-002
     title: "Consolidate configs into single source"
@@ -122,7 +134,7 @@ priority_1_critical:
 
   - id: P1-004
     title: "Fix hardcoded ports/URLs in code"
-    status: "[~]"  # in progress
+    status: "[x]"  # completed
     severity: MEDIUM
     effort: LOW
     description: |
@@ -143,17 +155,24 @@ priority_1_critical:
       - web-gui/docker-compose.yml
     tasks:
       - description: "Create services.json or use env vars for URLs"
-        status: "[ ]"
+        status: "[x]"
       - description: "Update api.ts to read from config/env"
-        status: "[ ]"
+        status: "[x]"
       - description: "Update Chat.tsx MODEL_MANAGER_API"
-        status: "[ ]"
+        status: "[x]"
       - description: "Fix docker-compose SEARXNG_URL"
-        status: "[ ]"
+        status: "[x]"
       - description: "Document environment variables"
-        status: "[ ]"
-    notes: ""
-    completed_date: null
+        status: "[x]"
+    notes: |
+      Implementation complete (2026-01-14):
+      - Created src/config.ts with centralized SERVICES and PORTS
+      - Uses Vite VITE_* environment variables at build time
+      - Updated api.ts, Chat.tsx, Dashboard.tsx to use config
+      - Updated Dockerfile to accept build args
+      - Updated docker-compose.yml with env var substitution
+      - Created .env.example documentation
+    completed_date: "2026-01-14"
 
 # =============================================================================
 # PRIORITY 2: IMPORTANT (Medium Term)
@@ -477,16 +496,16 @@ completed:
 # =============================================================================
 summary:
   total_items: 17
-  completed: 4
-  in_progress: 5
+  completed: 6
+  in_progress: 3
   not_started: 8
   wont_fix: 0
 
-  priority_1_progress: "1/4 complete (25%)"
+  priority_1_progress: "3/4 complete (75%)"
   priority_2_progress: "0/5 complete (0%)"
   priority_3_progress: "0/5 complete (0%)"
 
   next_actions:
-    - "P1-001: Implement health check polling in model-manager"
-    - "P1-004: Extract hardcoded ports to environment variables"
+    - "P1-002: Consolidate configs into single source (models.yaml)"
+    - "P1-003: Add API authentication (optional for local network)"
     - "P2-001: Add estimated_memory to model configs"

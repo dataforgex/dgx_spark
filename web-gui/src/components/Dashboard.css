@@ -313,6 +313,11 @@
   color: #fb923c;
 }
 
+.engine-badge.script {
+  background: rgba(168, 85, 247, 0.2);
+  color: #a855f7;
+}
+
 .managed-model-status {
   font-size: 0.8rem;
   font-weight: 500;
@@ -330,6 +335,70 @@
 
 .managed-model-status.starting {
   color: #fbbf24;
+}
+
+/* Startup Progress */
+.startup-progress {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  background: rgba(251, 191, 36, 0.1);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(251, 191, 36, 0.2);
+}
+
+.progress-bar {
+  height: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #fbbf24, #f59e0b);
+  border-radius: 3px;
+  transition: width 0.5s ease-out;
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(251, 191, 36, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 8px rgba(251, 191, 36, 0.8);
+  }
+}
+
+.progress-details {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.progress-time {
+  color: #fbbf24;
+}
+
+.progress-checks {
+  color: var(--text-tertiary);
+}
+
+.managed-model-card.starting {
+  border-color: rgba(251, 191, 36, 0.3);
+  animation: border-pulse 2s ease-in-out infinite;
+}
+
+@keyframes border-pulse {
+  0%, 100% {
+    border-color: rgba(251, 191, 36, 0.3);
+  }
+  50% {
+    border-color: rgba(251, 191, 36, 0.6);
+  }
 }
 
 .managed-model-details {

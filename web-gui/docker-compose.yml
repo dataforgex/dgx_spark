@@ -4,13 +4,20 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Build-time args for Vite (frontend)
+        - VITE_METRICS_API_PORT=${VITE_METRICS_API_PORT:-5174}
+        - VITE_MODEL_MANAGER_PORT=${VITE_MODEL_MANAGER_PORT:-5175}
+        - VITE_SANDBOX_PORT=${VITE_SANDBOX_PORT:-5176}
+        - VITE_SEARXNG_PORT=${VITE_SEARXNG_PORT:-8080}
     container_name: dgx-spark-web-gui
     restart: unless-stopped
     ports:
       - "5173:5173"  # Web GUI
       - "5174:5174"  # Metrics API
     environment:
-      - SEARXNG_URL=http://192.168.1.89:8080
+      # Runtime env for metrics-api.py (backend)
+      - SEARXNG_URL=${SEARXNG_URL:-http://localhost:8080}
     volumes:
       # Mount Docker socket to allow container status monitoring
       - /var/run/docker.sock:/var/run/docker.sock:ro

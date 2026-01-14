@@ -14,6 +14,7 @@ import {
   type ScriptableContext
 } from 'chart.js'
 import { Line, Doughnut } from 'react-chartjs-2'
+import { SERVICES, PORTS } from '../config'
 import './Dashboard.css'
 
 ChartJS.register(
@@ -54,6 +55,13 @@ interface DockerContainer {
   ports: string
 }
 
+interface StartupProgress {
+  elapsed_seconds: number
+  timeout_seconds: number
+  health_checks: number
+  progress_percent: number
+}
+
 interface ManagedModel {
   id: string
   name: string
@@ -62,6 +70,7 @@ interface ManagedModel {
   status: string
   container_name: string
   memory_mb: number | null
+  startup_progress: StartupProgress | null
 }
 
 export function Dashboard() {
@@ -85,14 +94,9 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Use the current hostname instead of hardcoded localhost
-  // Use 127.0.0.1 for localhost to avoid IPv6 resolution issues
-  const getApiHost = () => {
-    const hostname = window.location.hostname;
-    return hostname === 'localhost' ? '127.0.0.1' : hostname;
-  };
-  const API_BASE = `http://${getApiHost()}:5174`
-  const MODEL_MANAGER_API = `http://${getApiHost()}:5175`
+  // Use centralized service URLs from config
+  const API_BASE = SERVICES.METRICS_API
+  const MODEL_MANAGER_API = SERVICES.MODEL_MANAGER
 
   useEffect(() => {
     const fetchMetrics = async () => {
@@ -198,7 +202,7 @@ export function Dashboard() {
       <div className="dashboard-error">
         <h2>Connection Error</h2>
         <p>{error}</p>
-        <p>Make sure the metrics API server is running on port 5174</p>
+        <p>Make sure the metrics API server is running on port {PORTS.METRICS_API}</p>
       </div>
     )
   }
@@ -480,6 +484,27 @@ export function Dashboard() {
                   <div className={`managed-model-status ${model.status}`}>
                     {model.status === 'running' ? '● Running' : model.status === 'starting' ? '◐ Starting' : '○ Stopped'}
                   </div>
+                  {/* Startup Progress Bar */}
+                  {model.status === 'starting' && model.startup_progress && (
+                    <div className="startup-progress">
+                      <div className="progress-bar">
+                        <div
+                          className="progress-fill"
+                          style={{ width: `${model.startup_progress.progress_percent}%` }}
+                        />
+                      </div>
+                      <div className="progress-details">
+                        <span className="progress-time">
+                          {Math.floor(model.startup_progress.elapsed_seconds / 60)}:{(model.startup_progress.elapsed_seconds % 60).toString().padStart(2, '0')}
+                          {' / '}
+                          {Math.floor(model.startup_progress.timeout_seconds / 60)}:{(model.startup_progress.timeout_seconds % 60).toString().padStart(2, '0')}
+                        </span>
+                        <span className="progress-checks">
+                          {model.startup_progress.health_checks} checks
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   <div className="managed-model-details">
                     <div className="detail-row">
                       <span>Port:</span>
@@ -500,6 +525,14 @@ export function Dashboard() {
                         disabled={modelActions[model.id]}
                       >
                         {modelActions[model.id] ? 'Stopping...' : 'Stop'}
+                      </button>
+                    ) : model.status === 'starting' ? (
+                      <button
+                        className="model-btn stop"
+                        onClick={() => handleStopModel(model.id)}
+                        disabled={modelActions[model.id]}
+                      >
+                        {modelActions[model.id] ? 'Stopping...' : 'Cancel'}
                       </button>
                     ) : (
                       <button

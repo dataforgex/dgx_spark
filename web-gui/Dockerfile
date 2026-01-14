@@ -4,6 +4,18 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app
 
+# Build-time environment variables for Vite (embedded in JS bundle)
+ARG VITE_METRICS_API_PORT=5174
+ARG VITE_MODEL_MANAGER_PORT=5175
+ARG VITE_SANDBOX_PORT=5176
+ARG VITE_SEARXNG_PORT=8080
+
+# Pass to environment for Vite build
+ENV VITE_METRICS_API_PORT=$VITE_METRICS_API_PORT
+ENV VITE_MODEL_MANAGER_PORT=$VITE_MODEL_MANAGER_PORT
+ENV VITE_SANDBOX_PORT=$VITE_SANDBOX_PORT
+ENV VITE_SEARXNG_PORT=$VITE_SEARXNG_PORT
+
 # Copy package files
 COPY package*.json ./
 
@@ -13,7 +25,7 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build the frontend
+# Build the frontend (Vite will embed VITE_* env vars)
 RUN npm run build
 
 # Stage 2: Production image with NVIDIA tools for nvidia-smi

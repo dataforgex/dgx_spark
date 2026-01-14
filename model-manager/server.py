@@ -8,13 +8,73 @@ import os
 import subprocess
 import asyncio
 import time
+import httpx
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="Model Manager API", version="1.0.0")
+# Track models that are starting up
+# Format: {model_id: {"start_time": float, "port": int, "timeout": int, "checks": int}}
+_starting_models: dict = {}
+_starting_lock = asyncio.Lock()
+
+# Health check configuration
+HEALTH_CHECK_INTERVAL = 5  # seconds between checks
+DEFAULT_STARTUP_TIMEOUT = 600  # 10 minutes default
+LARGE_MODEL_TIMEOUT = 900  # 15 minutes for 100B+ models
+
+
+async def health_check_loop():
+    """Background task that polls health of starting models."""
+    while True:
+        await asyncio.sleep(HEALTH_CHECK_INTERVAL)
+
+        async with _starting_lock:
+            completed = []
+            for model_id, info in _starting_models.items():
+                elapsed = time.time() - info["start_time"]
+
+                # Check timeout
+                if elapsed > info["timeout"]:
+                    print(f"[health] Model {model_id} startup timed out after {elapsed:.0f}s")
+                    completed.append(model_id)
+                    continue
+
+                # Check health endpoint
+                is_healthy = await check_model_health(info["port"])
+                info["checks"] += 1
+
+                if is_healthy:
+                    print(f"[health] Model {model_id} is ready after {elapsed:.0f}s ({info['checks']} checks)")
+                    completed.append(model_id)
+                else:
+                    if info["checks"] % 6 == 0:  # Log every 30s
+                        print(f"[health] Model {model_id} still starting... {elapsed:.0f}s elapsed")
+
+            # Remove completed models from tracking
+            for model_id in completed:
+                del _starting_models[model_id]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage startup and shutdown of background tasks."""
+    # Start health check loop
+    health_task = asyncio.create_task(health_check_loop())
+    print("[startup] Health check background task started")
+    yield
+    # Cleanup on shutdown
+    health_task.cancel()
+    try:
+        await health_task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(title="Model Manager API", version="1.0.0", lifespan=lifespan)
 
 # CORS for web-gui
 app.add_middleware(
@@ -51,9 +111,11 @@ class ModelStatus(BaseModel):
     name: str
     engine: str
     port: int
-    status: str  # running, stopped, starting
+    status: str  # running, stopped, starting, not_created
     container_name: str
     memory_mb: Optional[int] = None
+    # Startup progress (only present when status="starting")
+    startup_progress: Optional[dict] = None  # {elapsed_seconds, timeout_seconds, progress_percent}
 
 
 class SystemMemory(BaseModel):
@@ -141,6 +203,77 @@ async def check_port_in_use(port: int) -> bool:
         return result == 0
     except Exception:
         return False
+
+
+async def check_model_health(port: int) -> bool:
+    """Check if a model's HTTP endpoint is healthy and ready to serve.
+
+    Tries /health first (vLLM), then /v1/models as fallback.
+    Returns True only if the model is fully loaded and ready.
+    """
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        # Try /health endpoint first (vLLM)
+        try:
+            response = await client.get(f"http://localhost:{port}/health")
+            if response.status_code == 200:
+                return True
+        except Exception:
+            pass
+
+        # Try /v1/models as fallback (OpenAI-compatible)
+        try:
+            response = await client.get(f"http://localhost:{port}/v1/models")
+            if response.status_code == 200:
+                data = response.json()
+                # Check if at least one model is loaded
+                if data.get("data") and len(data["data"]) > 0:
+                    return True
+        except Exception:
+            pass
+
+        # Try Ollama-specific endpoint
+        try:
+            response = await client.get(f"http://localhost:{port}/api/tags")
+            if response.status_code == 200:
+                return True
+        except Exception:
+            pass
+
+    return False
+
+
+async def get_model_startup_info(model_id: str) -> Optional[dict]:
+    """Get startup progress info for a model if it's currently starting."""
+    async with _starting_lock:
+        if model_id in _starting_models:
+            info = _starting_models[model_id]
+            elapsed = time.time() - info["start_time"]
+            return {
+                "elapsed_seconds": int(elapsed),
+                "timeout_seconds": info["timeout"],
+                "health_checks": info["checks"],
+                "progress_percent": min(95, int((elapsed / info["timeout"]) * 100))
+            }
+    return None
+
+
+async def register_starting_model(model_id: str, port: int, timeout: int = DEFAULT_STARTUP_TIMEOUT):
+    """Register a model as starting up for health monitoring."""
+    async with _starting_lock:
+        _starting_models[model_id] = {
+            "start_time": time.time(),
+            "port": port,
+            "timeout": timeout,
+            "checks": 0
+        }
+    print(f"[health] Registered model {model_id} for health monitoring (port {port}, timeout {timeout}s)")
+
+
+async def unregister_starting_model(model_id: str):
+    """Remove a model from startup tracking."""
+    async with _starting_lock:
+        if model_id in _starting_models:
+            del _starting_models[model_id]
 
 
 async def get_script_model_status(port: int) -> str:
@@ -294,35 +427,77 @@ async def list_models() -> list[ModelStatus]:
         for model_id, model_config in config["models"].items():
             container_name = model_config.get("container_name", model_id)
             engine = model_config["engine"]
+            port = model_config["port"]
 
             # Script-based models check port instead of container
             if engine == "script":
                 script_models_to_check.append((model_id, model_config))
                 continue
 
+            # Check if this model is in the starting tracker
+            startup_info = await get_model_startup_info(model_id)
+
             # Determine status from batch results (Docker-based models)
             if container_name in running_containers:
-                status = "running"
+                # Container is running, but is it healthy?
+                if startup_info:
+                    # Still in startup tracking - check health
+                    is_healthy = await check_model_health(port)
+                    if is_healthy:
+                        status = "running"
+                        await unregister_starting_model(model_id)
+                        startup_info = None
+                    else:
+                        status = "starting"
+                else:
+                    # Not in startup tracking, assume healthy
+                    status = "running"
                 running_model_containers.append(container_name)
             elif container_name in all_containers:
                 status = "stopped"
+                # Clear any stale startup tracking
+                await unregister_starting_model(model_id)
+                startup_info = None
             else:
                 status = "not_created"
+                startup_info = None
 
             models.append(ModelStatus(
                 id=model_id,
                 name=model_config["name"],
                 engine=engine,
-                port=model_config["port"],
+                port=port,
                 status=status,
                 container_name=container_name,
-                memory_mb=None  # Memory fetched separately to avoid slow docker stats
+                memory_mb=None,  # Memory fetched separately to avoid slow docker stats
+                startup_progress=startup_info
             ))
 
         # Check script-based models by port
         for model_id, model_config in script_models_to_check:
             port = model_config["port"]
-            status = await get_script_model_status(port)
+            startup_info = await get_model_startup_info(model_id)
+
+            # Check if port is in use
+            port_in_use = await check_port_in_use(port)
+
+            if port_in_use:
+                # Port is listening, check if healthy
+                if startup_info:
+                    is_healthy = await check_model_health(port)
+                    if is_healthy:
+                        status = "running"
+                        await unregister_starting_model(model_id)
+                        startup_info = None
+                    else:
+                        status = "starting"
+                else:
+                    status = "running"
+            else:
+                status = "stopped"
+                await unregister_starting_model(model_id)
+                startup_info = None
+
             models.append(ModelStatus(
                 id=model_id,
                 name=model_config["name"],
@@ -330,7 +505,8 @@ async def list_models() -> list[ModelStatus]:
                 port=port,
                 status=status,
                 container_name=model_config.get("script_dir", model_id),
-                memory_mb=None
+                memory_mb=None,
+                startup_progress=startup_info
             ))
 
         # Fetch memory for running containers in parallel (if any)
@@ -396,21 +572,43 @@ async def start_model(model_id: str) -> dict:
     # Invalidate cache since we're changing state
     invalidate_cache()
 
+    # Determine startup timeout based on model size/name
+    # Large models (100B+) need more time
+    startup_timeout = DEFAULT_STARTUP_TIMEOUT
+    model_name = model_config.get("name", "").lower()
+    if "235b" in model_name or "100b" in model_name or "70b" in model_name:
+        startup_timeout = LARGE_MODEL_TIMEOUT
+
     # Script-based models use port check instead of container status
     if engine == "script":
         port = model_config["port"]
         if await check_port_in_use(port):
-            return {"message": f"Model {model_id} is already running", "status": "running"}
+            # Check if it's actually healthy
+            if await check_model_health(port):
+                return {"message": f"Model {model_id} is already running", "status": "running"}
+            # Port in use but not healthy - might be starting
+            startup_info = await get_model_startup_info(model_id)
+            if startup_info:
+                return {
+                    "message": f"Model {model_id} is already starting",
+                    "status": "starting",
+                    "startup_progress": startup_info
+                }
 
         # Run serve.sh script
         try:
             returncode, stdout, stderr = await run_model_script(model_config, "serve.sh")
             if returncode != 0:
                 raise HTTPException(status_code=500, detail=f"Failed to start model: {stderr}")
+
+            # Register for health monitoring
+            await register_starting_model(model_id, port, startup_timeout)
+
             return {
-                "message": f"Model {model_id} started successfully",
+                "message": f"Model {model_id} starting (health checks every {HEALTH_CHECK_INTERVAL}s)",
                 "status": "starting",
-                "port": port
+                "port": port,
+                "timeout_seconds": startup_timeout
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -453,10 +651,15 @@ async def start_model(model_id: str) -> dict:
                 detail=f"Failed to start container: {stderr}"
             )
 
+        # Register for health monitoring
+        port = model_config["port"]
+        await register_starting_model(model_id, port, startup_timeout)
+
         return {
-            "message": f"Model {model_id} started successfully",
+            "message": f"Model {model_id} starting (health checks every {HEALTH_CHECK_INTERVAL}s)",
             "status": "starting",
-            "container_id": stdout.strip()[:12]
+            "container_id": stdout.strip()[:12] if stdout else "",
+            "timeout_seconds": startup_timeout
         }
     except asyncio.TimeoutError:
         raise HTTPException(status_code=500, detail="Command timed out")
@@ -510,9 +713,55 @@ async def stop_model(model_id: str) -> dict:
         # Remove the stopped container
         await async_run_command(["docker", "rm", container_name])
 
+        # Unregister from health monitoring
+        await unregister_starting_model(model_id)
+
         return {"message": f"Model {model_id} stopped successfully", "status": "stopped"}
     except asyncio.TimeoutError:
         raise HTTPException(status_code=500, detail="Command timed out")
+
+
+@app.get("/api/models/{model_id}/health")
+async def check_model_health_endpoint(model_id: str) -> dict:
+    """Check if a model is healthy and ready to serve requests."""
+    config = load_models_config()
+
+    if model_id not in config["models"]:
+        raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+
+    model_config = config["models"][model_id]
+    port = model_config["port"]
+
+    # Check if healthy
+    is_healthy = await check_model_health(port)
+
+    # Get startup info if available
+    startup_info = await get_model_startup_info(model_id)
+
+    if is_healthy:
+        return {
+            "model_id": model_id,
+            "healthy": True,
+            "status": "running",
+            "port": port
+        }
+    elif startup_info:
+        return {
+            "model_id": model_id,
+            "healthy": False,
+            "status": "starting",
+            "port": port,
+            "startup_progress": startup_info
+        }
+    else:
+        # Check if container/port is even up
+        port_in_use = await check_port_in_use(port)
+        return {
+            "model_id": model_id,
+            "healthy": False,
+            "status": "starting" if port_in_use else "stopped",
+            "port": port
+        }
 
 
 @app.get("/api/models/{model_id}/logs")
