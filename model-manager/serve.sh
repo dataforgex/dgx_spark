@@ -37,14 +37,13 @@ echo "Container: ${CONTAINER_NAME}"
 echo "Port: ${PORT}"
 echo "=================================================="
 
-# Run container with access to Docker socket and models.json
+# Run container with access to Docker socket and models.yaml
 # Using host network to avoid IPv6 resolution issues
 # Mount parent dir for script-based models (engine: "script")
 docker run -d \
     --name ${CONTAINER_NAME} \
     --network host \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    -v "${PARENT_DIR}/models.json:/app/models.json:ro" \
     -v "${PARENT_DIR}:/app/models:ro" \
     -v "${HOME}/.cache/huggingface:/root/.cache/huggingface" \
     -e HOST_HOME="${HOME}" \

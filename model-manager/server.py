@@ -170,9 +170,8 @@ add_auth_middleware(app, skip_paths={"/api/models", "/api/system/memory"})
 # Local: use parent directory of this script
 MODELS_BASE_DIR = Path(os.environ.get("MODELS_BASE_DIR", str(Path(__file__).parent.parent)))
 
-# Config paths - prefer YAML over JSON for new format
+# Config path
 MODELS_YAML_PATH = MODELS_BASE_DIR / "models.yaml"
-MODELS_JSON_PATH = MODELS_BASE_DIR / "models.json"
 
 # When running in Docker, we need to use host paths for volume mounts
 # The container mounts host's ~/.cache/huggingface to /root/.cache/huggingface
@@ -425,45 +424,33 @@ def validate_config(config: dict, config_path: Path) -> list[str]:
 
 
 def load_models_config() -> dict:
-    """Load models configuration from YAML or JSON file.
+    """Load models configuration from YAML file.
 
-    Prefers models.yaml (new format) over models.json (legacy).
     Normalizes YAML format to match the internal structure.
     """
     global _config_cache
 
-    # Determine which config file to use
-    if MODELS_YAML_PATH.exists():
-        config_path = MODELS_YAML_PATH
-        is_yaml = True
-    elif MODELS_JSON_PATH.exists():
-        config_path = MODELS_JSON_PATH
-        is_yaml = False
-    else:
+    if not MODELS_YAML_PATH.exists():
         raise HTTPException(
             status_code=500,
-            detail=f"No config file found. Expected {MODELS_YAML_PATH} or {MODELS_JSON_PATH}"
+            detail=f"Config file not found: {MODELS_YAML_PATH}"
         )
 
     # Check if we need to reload (file changed)
-    mtime = config_path.stat().st_mtime
+    mtime = MODELS_YAML_PATH.stat().st_mtime
     if _config_cache["config"] is not None and _config_cache["mtime"] == mtime:
         return _config_cache["config"]
 
     # Load config
-    with open(config_path) as f:
-        if is_yaml:
-            raw_config = yaml.safe_load(f)
-            config = normalize_yaml_config(raw_config)
-        else:
-            config = json.load(f)
+    with open(MODELS_YAML_PATH) as f:
+        raw_config = yaml.safe_load(f)
+        config = normalize_yaml_config(raw_config)
 
     # Validate config (raises HTTPException on fatal errors)
-    warnings = validate_config(config, config_path)
+    warnings = validate_config(config, MODELS_YAML_PATH)
 
     # Log result
-    format_type = "" if is_yaml else " (legacy JSON)"
-    log.info("config_loaded", model_count=len(config['models']), config_path=str(config_path), format=format_type.strip() or "yaml")
+    log.info("config_loaded", model_count=len(config['models']), config_path=str(MODELS_YAML_PATH))
     for warning in warnings:
         log.warning("config_warning", message=warning)
 
