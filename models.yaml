@@ -96,7 +96,7 @@ models:
     description: "Mistral's efficient 14B parameter model"
     engine: vllm
     port: 8103
-    container_name: "vllm-mistral3-14b"
+    container_name: "vllm-ministral3-14b"
     model_id: "mistralai/Ministral-3-14B-Instruct-2512"
     estimated_memory_gb: 30
     settings:
@@ -152,7 +152,7 @@ models:
     description: "NVIDIA Nemotron in BF16 precision"
     engine: script
     port: 8105
-    script_dir: "vllm-nemotron-3-nano-30b-fp16"
+    script_dir: "vllm-nemotron-3-nano-30b-bf16"
     model_id: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
     estimated_memory_gb: 65
     settings:
@@ -161,18 +161,3 @@ models:
       enable_auto_tool_choice: true
       tool_call_parser: "qwen3_coder"
 
-  # ===========================================================================
-  # TensorRT-LLM Models (currently disabled due to GB10 compatibility issues)
-  # ===========================================================================
-
-  nemotron-3-nano-30b-fp8:
-    name: "Nemotron-3-Nano-30B-FP8"
-    description: "TRT-LLM optimized (disabled - see docs/TRTLLM_ISSUES.md)"
-    engine: trtllm
-    port: 8107
-    container_name: "trtllm-nemotron-3-nano-30b-fp8"
-    script_dir: "trtllm-nemotron-3-nano-30b-fp8"
-    model_id: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8"
-    estimated_memory_gb: 35
-    enabled: false  # Disabled due to GB10 compatibility
-    settings: {}

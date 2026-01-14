@@ -13,7 +13,7 @@
 # ==============================================================================
 
 # Container configuration
-CONTAINER_NAME="vllm-mistral3-14b"
+CONTAINER_NAME="vllm-ministral3-14b"
 
 # Model configuration
 MODEL_NAME="mistralai/Ministral-3-14B-Instruct-2512"
@@ -67,7 +67,7 @@ DOCKER_CMD="docker run -d \
   -p ${PORT}:8000 \
   -v ${HF_CACHE_DIR}:/root/.cache/huggingface \
   --restart unless-stopped \
-  nvcr.io/nvidia/vllm:25.09-py3 \
+  nvcr.io/nvidia/vllm:25.11-py3 \
   vllm serve \"${MODEL_NAME}\" \
   --tokenizer_mode mistral \
   --config_format mistral \

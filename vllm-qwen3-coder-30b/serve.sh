@@ -71,7 +71,7 @@ DOCKER_CMD="docker run -d \
   -p ${PORT}:8000 \
   -v ${HF_CACHE_DIR}:/root/.cache/huggingface \
   --restart unless-stopped \
-  nvcr.io/nvidia/vllm:25.09-py3 \
+  nvcr.io/nvidia/vllm:25.11-py3 \
   vllm serve \"${MODEL_NAME}\" \
   --max-model-len ${MAX_MODEL_LEN} \
   --max-num-seqs ${MAX_NUM_SEQS} \
