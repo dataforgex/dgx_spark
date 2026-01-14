@@ -190,29 +190,6 @@ docker logs -f vllm-qwen3-coder-30b-awq
 nvidia-smi
 ```
 
-## Adding New Models
-
-1. Create folder: `vllm-{model-name}/`
-2. Add to `models.yaml`:
-```yaml
-model-key:
-  name: "Display Name"
-  description: "Model description"
-  engine: vllm
-  port: 8106
-  container_name: "vllm-model-name"
-  model_id: "org/model-name"
-  estimated_memory_gb: 30
-  settings:
-    max_model_len: 32768
-    max_num_seqs: 8
-    gpu_memory_utilization: 0.3
-    enable_auto_tool_choice: true
-    tool_call_parser: "qwen3_coder"  # or "mistral", "hermes"
-```
-3. Create `serve.sh` (copy from existing model, add `--allowed-origins '["*"]'` for CORS)
-4. Restart model-manager: `docker restart model-manager`
-
 ## Requirements
 
 - **Hardware**: DGX Spark or NVIDIA GPU with 64+ GB VRAM
