@@ -21,6 +21,7 @@ class ModelRegistry {
   private lastFetch: number = 0;
   private fetchPromise: Promise<void> | null = null;
   private readonly CACHE_TTL = 30000; // 30 seconds
+  private hasLoggedInitialLoad: boolean = false;
 
   async getModel(modelKey: string): Promise<ModelConfig | null> {
     await this.ensureFresh();
@@ -78,7 +79,11 @@ class ModelRegistry {
       }
 
       this.lastFetch = Date.now();
-      console.log(`📋 Loaded ${this.models.size} models from API`);
+      // Only log on first load
+      if (!this.hasLoggedInitialLoad && this.models.size > 0) {
+        console.log(`📋 Loaded ${this.models.size} models from API`);
+        this.hasLoggedInitialLoad = true;
+      }
     } catch (error) {
       console.warn('Error fetching models:', error);
       this.loadFallbackModels();
@@ -220,7 +225,12 @@ export class ChatAPI {
     this.loadModelConfig(modelKey);
   }
 
+  private configLoaded: boolean = false;
+
   private async loadModelConfig(modelKey: string): Promise<void> {
+    // Only log once per model change
+    const shouldLog = !this.configLoaded || this.modelKey !== modelKey;
+
     const config = await modelRegistry.getModel(modelKey);
     if (config) {
       this.port = config.port;
@@ -229,7 +239,11 @@ export class ChatAPI {
       this.maxContextLength = config.maxContextLength;
       this.supportsTools = config.supportsTools;
       this.toolCallParser = config.toolCallParser;
-      console.log(`🔧 Model ${modelKey}: supportsTools=${this.supportsTools}, parser=${this.toolCallParser}`);
+
+      if (shouldLog) {
+        console.log(`🔧 Model ${modelKey}: supportsTools=${this.supportsTools}, parser=${this.toolCallParser}`);
+        this.configLoaded = true;
+      }
     }
   }
 
