@@ -17,18 +17,6 @@ https://github.com/dataforgex/dgx_spark.git  # Wrong credentials
 
 The SSH config (`~/.ssh/config`) maps `github-dataforgex` to the correct SSH key for the `dataforgex` organization.
 
-## Services
-
-| Service | Port | Start Command |
-|---------|------|---------------|
-| Web GUI | 5173 | Docker container `dgx-spark-web-gui` (auto-starts) |
-| Metrics API | 5174 | Same container as Web GUI |
-| Model Manager | 5175 | `./model-manager/serve.sh` |
-| Tool Sandbox | 5176 | `./tool-call-sandbox/serve.sh` |
-| SearXNG Search | 8080 | `cd searxng-docker && ./start.sh` |
-
-All services have `restart: unless-stopped` policy.
-
 ## Claude Transcripts
 
 Convert Claude Code sessions to HTML:
