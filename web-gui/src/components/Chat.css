@@ -1,7 +1,8 @@
 .chat-layout {
   display: flex;
-  height: 100vh;
-  width: 100vw;
+  flex: 1;
+  height: calc(100vh - 60px); /* Account for navigation bar */
+  width: 100%;
   overflow: hidden;
   background: transparent;
 }
@@ -319,11 +320,15 @@
 
 /* Mobile Responsive Styles */
 @media (max-width: 768px) {
+  .chat-layout {
+    height: calc(100vh - 50px); /* Smaller nav on mobile */
+  }
+
   .chat-sidebar {
     position: fixed;
     left: 0;
-    top: 0;
-    height: 100vh;
+    top: 50px; /* Below navigation */
+    height: calc(100vh - 50px);
     z-index: 100;
     transform: translateX(-100%);
   }
@@ -335,7 +340,10 @@
   .sidebar-overlay {
     display: none;
     position: fixed;
-    inset: 0;
+    top: 50px;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background: rgba(0, 0, 0, 0.5);
     z-index: 99;
   }
