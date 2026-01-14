@@ -224,37 +224,6 @@ Benchmarked on DGX Spark (GB10 Blackwell, 128GB unified memory):
 
 *TRT-LLM removed due to GB10 compatibility issues. See [docs/TRTLLM_ISSUES.md](docs/TRTLLM_ISSUES.md).
 
-## Troubleshooting
-
-### Model Won't Start
-```bash
-# Check if port is in use
-ss -tlnp | grep 8104
-
-# Check container logs
-docker logs vllm-qwen3-coder-30b-awq
-
-# Remove stuck container
-docker rm -f vllm-qwen3-coder-30b-awq
-```
-
-### Out of Memory
-```bash
-# Check GPU usage
-nvidia-smi
-
-# Dashboard shows estimated memory per model
-# Force start with ?force=true to bypass memory check
-```
-
-### Web Search Not Working
-1. Ensure SearXNG is running: `docker ps | grep searxng`
-2. Check search toggle is enabled in chat
-3. Use a model with tool calling support
-
-### CORS Errors
-Models need `--allowed-origins '["*"]'` in serve.sh for browser access.
-
 ## Requirements
 
 - **Hardware**: DGX Spark or NVIDIA GPU with 64+ GB VRAM
