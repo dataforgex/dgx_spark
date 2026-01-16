@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChatAPI, AVAILABLE_MODELS } from '../api';
-import { SERVICES } from '../config';
+import { SERVICES, getApiHost } from '../config';
 import type { Message, Conversation } from '../types';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
@@ -114,6 +114,7 @@ interface ManagedModel {
   id: string;
   name: string;
   status: string;
+  port: number;
 }
 
 function ChatInner() {
@@ -166,15 +167,38 @@ function ChatInner() {
     });
   }, [selectedModel]);
 
-  // Fetch running models from model-manager API
+  // Fetch running models from model-manager API and check endpoint health
   useEffect(() => {
+    const checkModelHealth = async (port: number): Promise<boolean> => {
+      try {
+        const response = await fetch(`http://${getApiHost()}:${port}/v1/models`, {
+          signal: AbortSignal.timeout(2000),
+        });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    };
+
     const fetchRunningModels = async () => {
       try {
         const response = await fetch(`${MODEL_MANAGER_API}/api/models`);
         if (response.ok) {
           const models: ManagedModel[] = await response.json();
+
+          // Check both model-manager status AND actual endpoint health
+          const healthChecks = await Promise.all(
+            models.map(async (m) => {
+              // If model-manager says running, trust it
+              if (m.status === 'running') return { id: m.id, running: true };
+              // Otherwise, check if endpoint is actually responding (for externally managed models)
+              const isHealthy = await checkModelHealth(m.port);
+              return { id: m.id, running: isHealthy };
+            })
+          );
+
           const running = new Set(
-            models.filter(m => m.status === 'running').map(m => m.id)
+            healthChecks.filter(h => h.running).map(h => h.id)
           );
           setRunningModels(running);
           setModelsLoaded(true);

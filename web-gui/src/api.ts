@@ -124,6 +124,15 @@ class ModelRegistry {
         supportsTools: true,
         toolCallParser: 'mistral',
       },
+      'chandra-ocr': {
+        name: 'Chandra OCR',
+        port: 8106,
+        modelId: 'datalab-to/chandra',
+        maxTokens: 2048,
+        maxContextLength: 8192,
+        supportsTools: false,
+        toolCallParser: null,
+      },
     };
 
     this.models.clear();
@@ -202,11 +211,12 @@ export const AVAILABLE_MODELS: Record<string, { name: string; port: number; mode
       'qwen2-vl-7b': { name: 'Qwen2-VL-7B', port: 8101, modelId: 'Qwen/Qwen2-VL-7B-Instruct', maxTokens: 2048 },
       'qwen3-235b-awq': { name: 'Qwen3-235B-AWQ', port: 8235, modelId: 'qwen3-235b-awq', maxTokens: 2048 },
       'qwen3-vl-32b-ollama': { name: 'Qwen3-VL-32B (Ollama)', port: 11435, modelId: 'qwen3-vl:32b', maxTokens: 4096 },
+      'chandra-ocr': { name: 'Chandra OCR', port: 8106, modelId: 'datalab-to/chandra', maxTokens: 2048 },
     };
     return fallback[prop];
   },
   ownKeys() {
-    return ['qwen3-coder-30b-awq', 'ministral3-14b', 'qwen3-coder-30b', 'qwen2-vl-7b', 'qwen3-235b-awq', 'qwen3-vl-32b-ollama'];
+    return ['qwen3-coder-30b-awq', 'ministral3-14b', 'qwen3-coder-30b', 'qwen2-vl-7b', 'qwen3-235b-awq', 'qwen3-vl-32b-ollama', 'chandra-ocr'];
   },
   getOwnPropertyDescriptor() {
     return { enumerable: true, configurable: true };
