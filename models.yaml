@@ -110,6 +110,27 @@ models:
       enable_auto_tool_choice: true
       tool_call_parser: "mistral"
 
+  chandra-ocr:
+    name: "Chandra OCR"
+    description: "Document OCR with tables, handwriting, math equations, and full layout preservation (9B)"
+    engine: vllm
+    port: 8106
+    container_name: "vllm-chandra-ocr"
+    model_id: "datalab-to/chandra"
+    estimated_memory_gb: 24
+    # WARNING: Not currently working on GB10 (SM 12.1) - awaiting PyTorch/cuDNN/vLLM support
+    # See vllm-chandra-ocr/GB10_COMPATIBILITY_NOTES.md for details
+    disabled: true
+    settings:
+      max_model_len: 16384
+      max_num_seqs: 8
+      gpu_memory_utilization: 0.3
+      # Performance features
+      enable_prefix_caching: true
+      enable_chunked_prefill: true
+      enforce_eager: true
+      # Chandra is a vision model - no tool calling
+
   # ===========================================================================
   # Ollama Models
   # ===========================================================================

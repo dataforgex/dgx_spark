@@ -53,3 +53,9 @@ ngc/ngc-cli
 eurlex/
 errors/
 fps-game/
+
+# Chandra OCR compatibility notes (local findings, not for repo)
+vllm-chandra-ocr/GB10_COMPATIBILITY_NOTES.md
+vllm-chandra-ocr/venv/
+vllm-chandra-ocr/output/
+vllm-chandra-ocr/test_image.png
