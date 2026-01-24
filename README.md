@@ -56,7 +56,19 @@ cd web-gui && ./start-docker.sh
 |----------|---------|
 | `DGX_API_KEY` | Enable API authentication |
 | `DGX_RATE_LIMIT` | Requests/min per IP (default: 60) |
+| `DGX_LOG_LEVEL` | Log level: debug, info, warning, error (default: info) |
 | `HF_TOKEN` | HuggingFace access token |
+
+### Runtime Configuration
+
+```bash
+# Check current log level
+curl http://localhost:5175/api/config/log-level
+
+# Enable debug logging (no restart needed)
+curl -X POST http://localhost:5175/api/config/log-level \
+  -H "Content-Type: application/json" -d '{"level": "debug"}'
+```
 
 ### Architecture
 

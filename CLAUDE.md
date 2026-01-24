@@ -59,13 +59,14 @@ iperf3 -c 192.168.100.11 -t 10 -P 4
 - Distributed training
 - K8s pod-to-pod high-speed communication (with hostNetwork or Multus)
 
-## Key Directories
+## Key Files (Source of Truth)
 
-| Path | Purpose |
-|------|---------|
-| `model-manager/` | Web API for starting/stopping models |
-| `web-gui/` | React dashboard for GPU/container monitoring |
-| `tool-call-sandbox/` | Sandboxed LLM tool execution (skills-like pattern) |
-| `searxng-docker/` | Private search engine (no tracking) |
-| `vllm-*/` | vLLM model deployment configs |
-| `claude-transcripts/` | Session-to-HTML converter |
+Configuration and code are the authoritative source - check these files for current values:
+
+| What | Where to Look |
+|------|---------------|
+| **Model configs** | `models.yaml` (ports, settings, model IDs) |
+| **Service ports** | `model-manager/server.py`, `tool-call-sandbox/server.py` |
+| **Auth settings** | `shared/auth.py` |
+| **API endpoints** | `model-manager/server.py` (search for `@app.`) |
+| **Log level API** | `GET/POST /api/config/log-level` (runtime toggle) |
