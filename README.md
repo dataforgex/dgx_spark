@@ -26,6 +26,14 @@ To stop all services: `./start-all.sh --stop`
 - **Tool Calling** - Web search + sandboxed code execution
 - **OpenAI API** - Compatible endpoints on ports 8100-8235
 
+## Screenshots
+
+### Dashboard
+![Dashboard](docs/screenshots/control_page.png)
+
+### Chat
+![Chat](docs/screenshots/chat_page.png)
+
 ## Models
 
 | Model | Port | Best For |
