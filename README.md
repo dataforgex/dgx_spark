@@ -8,10 +8,14 @@ Local LLM infrastructure for DGX Spark (GB10 Blackwell) with vLLM, web UI, and m
 ## Quick Start
 
 ```bash
-cd web-gui && ./start-docker.sh
+./start-all.sh
 ```
 
-**Dashboard**: http://localhost:5173 | **Chat**: http://localhost:5173/chat
+Then open the **Dashboard** at http://localhost:5173 and start a model.
+
+**Chat**: http://localhost:5173/chat
+
+To stop all services: `./start-all.sh --stop`
 
 ## Features
 
@@ -37,8 +41,10 @@ cd web-gui && ./start-docker.sh
 
 ### Services
 
-| Service | Port | Start Command |
-|---------|------|---------------|
+Start all services: `./start-all.sh` (recommended)
+
+| Service | Port | Manual Start |
+|---------|------|--------------|
 | Web GUI | 5173 | `cd web-gui && ./start-docker.sh` |
 | Model Manager | 5175 | `cd model-manager && ./serve.sh` |
 | Tool Sandbox | 5176 | `cd tool-call-sandbox && ./serve.sh` |
