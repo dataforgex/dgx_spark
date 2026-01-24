@@ -5,6 +5,8 @@
 
 Local LLM infrastructure for DGX Spark (GB10 Blackwell) with vLLM, web UI, and model management. Works with 1 or 2 DGX Sparks.
 
+> ⭐ If you find this repo useful, please give it a star - that's all I ask. Thanks! :D
+
 ## Quick Start
 
 ```bash
