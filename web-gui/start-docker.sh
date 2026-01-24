@@ -33,11 +33,12 @@ else
 fi
 
 # Check if nvidia-docker runtime is available (for GPU support)
+# Use docker info instead of running a test container (avoids orphaned containers)
 if ! nvidia-smi &> /dev/null; then
     echo "⚠️  Warning: NVIDIA drivers not found"
     echo "GPU metrics will not work."
     echo ""
-elif ! docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu20.04 nvidia-smi &> /dev/null 2>&1; then
+elif ! docker info 2>/dev/null | grep -qi "runtimes.*nvidia"; then
     echo "⚠️  Warning: NVIDIA Docker runtime may not be configured"
     echo "GPU metrics may not work inside container."
     echo ""
