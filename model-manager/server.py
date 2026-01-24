@@ -743,6 +743,7 @@ def build_vllm_command(model_id: str, model_config: dict) -> list:
         "--restart", settings.get("restart_policy", "unless-stopped"),
         image,
         "vllm", "serve", model,
+        "--served-model-name", model_id,  # Use alias so frontend can reference by model key
     ]
 
     # Core vLLM settings
