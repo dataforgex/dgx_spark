@@ -243,7 +243,7 @@ export class ChatAPI {
     const fallback = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS['qwen3-coder-30b-awq'];
     this.modelKey = modelKey;
     this.port = fallback?.port || 8104;
-    this.model = fallback?.modelId || modelKey;
+    this.model = modelKey;  // Use alias, not HuggingFace model_id - vLLM serves model under this name
     this.maxTokens = fallback?.maxTokens || 2048;
     this.temperature = temperature;
     this.sessionId = generateUUID();
@@ -256,7 +256,7 @@ export class ChatAPI {
     const config = await modelRegistry.getModel(modelKey);
     if (config) {
       this.port = config.port;
-      this.model = config.modelId;
+      this.model = config.id;  // Use alias, not HuggingFace model_id - vLLM serves model under this name
       this.maxTokens = config.maxTokens;
       this.maxContextLength = config.maxContextLength;
       this.supportsTools = config.supportsTools;
@@ -449,7 +449,7 @@ export class ChatAPI {
     const fallback = AVAILABLE_MODELS[modelKey];
     if (fallback) {
       this.port = fallback.port;
-      this.model = fallback.modelId;
+      this.model = modelKey;  // Use alias, not HuggingFace model_id - vLLM serves model under this name
       this.maxTokens = fallback.maxTokens;
     }
     // Async update with full config

@@ -186,14 +186,17 @@ function ChatInner() {
         if (response.ok) {
           const models: ManagedModel[] = await response.json();
 
-          // Check both model-manager status AND actual endpoint health
+          // Check endpoint health only for models that model-manager says are running
+          // Don't ping stopped models - causes CORS errors and console noise
           const healthChecks = await Promise.all(
             models.map(async (m) => {
-              // If model-manager says running, trust it
-              if (m.status === 'running') return { id: m.id, running: true };
-              // Otherwise, check if endpoint is actually responding (for externally managed models)
-              const isHealthy = await checkModelHealth(m.port);
-              return { id: m.id, running: isHealthy };
+              // Only verify health for models marked as running
+              if (m.status === 'running') {
+                const isHealthy = await checkModelHealth(m.port);
+                return { id: m.id, running: isHealthy };
+              }
+              // Trust model-manager for stopped models - don't ping them
+              return { id: m.id, running: false };
             })
           );
 
