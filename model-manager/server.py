@@ -29,19 +29,36 @@ from contextlib import asynccontextmanager
 
 # Configure structlog for JSON logging
 import logging
-structlog.configure(
-    processors=[
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer()
-    ],
-    wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
-    context_class=dict,
-    logger_factory=structlog.PrintLoggerFactory(),
-    cache_logger_on_first_use=True,
-)
 
+# Log level mapping
+LOG_LEVELS = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
+
+# Current log level (can be changed at runtime)
+_current_log_level = os.environ.get("DGX_LOG_LEVEL", "info").lower()
+if _current_log_level not in LOG_LEVELS:
+    _current_log_level = "info"
+
+def _configure_logging(level: str):
+    """Configure structlog with the specified level."""
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.JSONRenderer()
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(LOG_LEVELS[level]),
+        context_class=dict,
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=False,  # Allow reconfiguration
+    )
+
+_configure_logging(_current_log_level)
 log = structlog.get_logger()
 
 # Track models that are starting up
@@ -1347,6 +1364,41 @@ async def check_model_memory(model_id: str) -> MemoryCheckResult:
 
     model_config = config["models"][model_id]
     return await check_memory_for_model(model_config)
+
+
+@app.get("/api/config/log-level")
+async def get_log_level():
+    """Get current log level."""
+    return {"level": _current_log_level}
+
+
+@app.post("/api/config/log-level")
+async def set_log_level(request: Request):
+    """
+    Set log level at runtime.
+
+    Body: {"level": "debug" | "info" | "warning" | "error"}
+    """
+    global _current_log_level
+
+    try:
+        body = await request.json()
+        level = body.get("level", "").lower()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    if level not in LOG_LEVELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid log level. Must be one of: {list(LOG_LEVELS.keys())}"
+        )
+
+    old_level = _current_log_level
+    _current_log_level = level
+    _configure_logging(level)
+
+    log.info("log_level_changed", old_level=old_level, new_level=level)
+    return {"level": level, "previous": old_level}
 
 
 @app.get("/api/health")
